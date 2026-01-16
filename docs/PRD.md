@@ -165,7 +165,7 @@ Browser                    Backend                     Claude CLI
 - [x] Create chat-input component
 - [x] Implement use-websocket hook
 - [x] Integrate with session-view
-- [ ] Handle message streaming and rendering
+- [x] Handle message streaming and rendering
 - [ ] Add connection status indicator
 
 ### Phase 3: Session Management

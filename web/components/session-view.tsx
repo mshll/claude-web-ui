@@ -1,9 +1,10 @@
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import type { ConversationMessage } from "@claude-run/api";
 import MessageBlock from "./message-block";
 import ScrollToBottomButton from "./scroll-to-bottom-button";
 import { ChatInput } from "./chat-input";
 import { useWebSocket } from "../hooks/use-websocket";
+import { useMessageStream, streamingToConversation } from "../hooks/use-message-stream";
 
 const MAX_RETRIES = 10;
 const BASE_RETRY_DELAY_MS = 1000;
@@ -26,7 +27,6 @@ function SessionView(props: SessionViewProps) {
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [autoScroll, setAutoScroll] = useState(true);
-  const [isProcessing, setIsProcessing] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const lastMessageRef = useRef<HTMLDivElement>(null);
   const offsetRef = useRef(0);
@@ -37,6 +37,14 @@ function SessionView(props: SessionViewProps) {
   const mountedRef = useRef(true);
 
   const {
+    streamingMessages,
+    handleChunk,
+    addUserMessage,
+    clearStreamingMessages,
+    isStreaming,
+  } = useMessageStream();
+
+  const {
     status: wsStatus,
     activeSessionId,
     startSession,
@@ -44,16 +52,16 @@ function SessionView(props: SessionViewProps) {
     interrupt,
   } = useWebSocket(getWebSocketUrl(), {
     onSessionStarted: () => {
-      setIsProcessing(false);
+      // Session started, ready for messages
     },
-    onAssistantChunk: () => {
-      setIsProcessing(true);
+    onAssistantChunk: (chunk) => {
+      handleChunk(chunk);
     },
     onSessionEnded: () => {
-      setIsProcessing(false);
+      // Session ended
     },
     onError: () => {
-      setIsProcessing(false);
+      // Error occurred
     },
   });
 
@@ -108,7 +116,7 @@ function SessionView(props: SessionViewProps) {
     setMessages([]);
     offsetRef.current = 0;
     retryCountRef.current = 0;
-    setIsProcessing(false);
+    clearStreamingMessages();
 
     connect();
 
@@ -121,7 +129,7 @@ function SessionView(props: SessionViewProps) {
         eventSourceRef.current.close();
       }
     };
-  }, [connect]);
+  }, [connect, clearStreamingMessages]);
 
   const scrollToBottom = useCallback(() => {
     if (!lastMessageRef.current) {
@@ -138,7 +146,7 @@ function SessionView(props: SessionViewProps) {
     if (autoScroll) {
       scrollToBottom();
     }
-  }, [messages, autoScroll, scrollToBottom]);
+  }, [messages, streamingMessages, autoScroll, scrollToBottom]);
 
   const handleScroll = () => {
     if (!containerRef.current || isScrollingProgrammaticallyRef.current) {
@@ -159,18 +167,27 @@ function SessionView(props: SessionViewProps) {
       startSession(sessionId, projectPath);
     }
 
-    setIsProcessing(true);
+    addUserMessage(content);
     sendMessage(content);
-  }, [wsStatus, activeSessionId, sessionId, projectPath, startSession, sendMessage]);
+  }, [wsStatus, activeSessionId, sessionId, projectPath, startSession, sendMessage, addUserMessage]);
 
   const handleInterrupt = useCallback(() => {
     interrupt();
-    setIsProcessing(false);
   }, [interrupt]);
 
   const summary = messages.find((m) => m.type === "summary");
-  const conversationMessages = messages.filter(
+  const historicalMessages = messages.filter(
     (m) => m.type === "user" || m.type === "assistant"
+  );
+
+  const streamingConversationMessages = useMemo(
+    () => streamingMessages.map(streamingToConversation),
+    [streamingMessages]
+  );
+
+  const allMessages = useMemo(
+    () => [...historicalMessages, ...streamingConversationMessages],
+    [historicalMessages, streamingConversationMessages]
   );
 
   const isConnected = wsStatus === "connected";
@@ -197,17 +214,17 @@ function SessionView(props: SessionViewProps) {
                 {summary.summary}
               </h2>
               <p className="mt-2 text-[11px] text-zinc-500">
-                {conversationMessages.length} messages
+                {allMessages.length} messages
               </p>
             </div>
           )}
 
           <div className="flex flex-col gap-2">
-            {conversationMessages.map((message, index) => (
+            {allMessages.map((message, index) => (
               <div
                 key={message.uuid || index}
                 ref={
-                  index === conversationMessages.length - 1
+                  index === allMessages.length - 1
                     ? lastMessageRef
                     : undefined
                 }
@@ -232,7 +249,7 @@ function SessionView(props: SessionViewProps) {
         onSend={handleSendMessage}
         onInterrupt={handleInterrupt}
         disabled={!isConnected}
-        isProcessing={isProcessing}
+        isProcessing={isStreaming}
         placeholder={isConnected ? "Send a message..." : "Connecting..."}
       />
     </div>

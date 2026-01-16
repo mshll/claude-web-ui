@@ -10,6 +10,16 @@ vi.mock("../hooks/use-websocket", () => ({
   useWebSocket: (...args: unknown[]) => mockUseWebSocket(...args),
 }));
 
+const mockUseMessageStream = vi.fn();
+vi.mock("../hooks/use-message-stream", () => ({
+  useMessageStream: () => mockUseMessageStream(),
+  streamingToConversation: (m: { id: string; type: string; content: unknown[] }) => ({
+    type: m.type,
+    uuid: m.id,
+    message: { role: m.type, content: m.content },
+  }),
+}));
+
 class MockEventSource {
   static instances: MockEventSource[] = [];
   url: string;
@@ -59,6 +69,14 @@ describe("SessionView", () => {
       interrupt: vi.fn().mockReturnValue(true),
       closeSession: vi.fn().mockReturnValue(true),
       switchMode: vi.fn().mockReturnValue(true),
+    });
+
+    mockUseMessageStream.mockReturnValue({
+      streamingMessages: [],
+      handleChunk: vi.fn(),
+      addUserMessage: vi.fn(),
+      clearStreamingMessages: vi.fn(),
+      isStreaming: false,
     });
   });
 
@@ -149,6 +167,7 @@ describe("SessionView", () => {
   it("calls startSession when sending first message", async () => {
     const mockStartSession = vi.fn().mockReturnValue(true);
     const mockSendMessage = vi.fn().mockReturnValue(true);
+    const mockAddUserMessage = vi.fn();
 
     mockUseWebSocket.mockReturnValue({
       status: "connected",
@@ -160,6 +179,14 @@ describe("SessionView", () => {
       interrupt: vi.fn().mockReturnValue(true),
       closeSession: vi.fn().mockReturnValue(true),
       switchMode: vi.fn().mockReturnValue(true),
+    });
+
+    mockUseMessageStream.mockReturnValue({
+      streamingMessages: [],
+      handleChunk: vi.fn(),
+      addUserMessage: mockAddUserMessage,
+      clearStreamingMessages: vi.fn(),
+      isStreaming: false,
     });
 
     render(<SessionView sessionId="test-session" projectPath="/test/project" />);
@@ -179,6 +206,7 @@ describe("SessionView", () => {
 
     expect(mockStartSession).toHaveBeenCalledWith("test-session", "/test/project");
     expect(mockSendMessage).toHaveBeenCalledWith("Hello Claude");
+    expect(mockAddUserMessage).toHaveBeenCalledWith("Hello Claude");
   });
 
   it("skips startSession when session is already active", async () => {
@@ -232,20 +260,18 @@ describe("SessionView", () => {
       switchMode: vi.fn().mockReturnValue(true),
     });
 
+    mockUseMessageStream.mockReturnValue({
+      streamingMessages: [],
+      handleChunk: vi.fn(),
+      addUserMessage: vi.fn(),
+      clearStreamingMessages: vi.fn(),
+      isStreaming: true,
+    });
+
     render(<SessionView sessionId="test-session" />);
 
     const eventSource = MockEventSource.instances[0];
     eventSource.emit("messages", []);
-
-    await waitFor(() => {
-      expect(screen.getByPlaceholderText("Send a message...")).toBeInTheDocument();
-    });
-
-    const textarea = screen.getByPlaceholderText("Send a message...");
-    fireEvent.change(textarea, { target: { value: "Hello" } });
-
-    const sendButton = screen.getByTitle("Send message");
-    fireEvent.click(sendButton);
 
     await waitFor(() => {
       expect(screen.getByTitle("Interrupt")).toBeInTheDocument();
@@ -302,5 +328,67 @@ describe("SessionView", () => {
 
     expect(MockEventSource.instances).toHaveLength(2);
     expect(MockEventSource.instances[1].url).toContain("session-2");
+  });
+
+  it("calls handleChunk when onAssistantChunk is triggered", async () => {
+    const mockHandleChunk = vi.fn();
+    let capturedOnAssistantChunk: ((chunk: unknown) => void) | undefined;
+
+    mockUseWebSocket.mockImplementation((_url: string, options: { onAssistantChunk?: (chunk: unknown) => void }) => {
+      capturedOnAssistantChunk = options.onAssistantChunk;
+      return {
+        status: "connected",
+        clientId: "client-1",
+        activeSessionId: null,
+        send: vi.fn().mockReturnValue(true),
+        startSession: vi.fn().mockReturnValue(true),
+        sendMessage: vi.fn().mockReturnValue(true),
+        interrupt: vi.fn().mockReturnValue(true),
+        closeSession: vi.fn().mockReturnValue(true),
+        switchMode: vi.fn().mockReturnValue(true),
+      };
+    });
+
+    mockUseMessageStream.mockReturnValue({
+      streamingMessages: [],
+      handleChunk: mockHandleChunk,
+      addUserMessage: vi.fn(),
+      clearStreamingMessages: vi.fn(),
+      isStreaming: false,
+    });
+
+    render(<SessionView sessionId="test-session" />);
+
+    const eventSource = MockEventSource.instances[0];
+    eventSource.emit("messages", []);
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText("Send a message...")).toBeInTheDocument();
+    });
+
+    expect(capturedOnAssistantChunk).toBeDefined();
+    capturedOnAssistantChunk!('{"type":"assistant"}');
+
+    expect(mockHandleChunk).toHaveBeenCalledWith('{"type":"assistant"}');
+  });
+
+  it("clears streaming messages when sessionId changes", async () => {
+    const mockClearStreamingMessages = vi.fn();
+
+    mockUseMessageStream.mockReturnValue({
+      streamingMessages: [],
+      handleChunk: vi.fn(),
+      addUserMessage: vi.fn(),
+      clearStreamingMessages: mockClearStreamingMessages,
+      isStreaming: false,
+    });
+
+    const { rerender } = render(<SessionView sessionId="session-1" />);
+
+    mockClearStreamingMessages.mockClear();
+
+    rerender(<SessionView sessionId="session-2" />);
+
+    expect(mockClearStreamingMessages).toHaveBeenCalled();
   });
 });

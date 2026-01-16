@@ -280,3 +280,47 @@
 - `vitest.config.ts` - Added setupFiles configuration
 - `package.json` - Added @testing-library/jest-dom dependency
 - `docs/PRD.md` - Marked task complete
+---
+
+## 2026-01-16: Phase 2 Task 4 - Handle message streaming and rendering
+
+### Completed
+- Created `web/hooks/use-message-stream.ts` with:
+  - `useMessageStream()` hook for accumulating WebSocket chunks into structured messages
+  - Parsing of Claude CLI JSON streaming events (assistant, content_block_start, content_block_delta, content_block_stop, message_stop, result)
+  - Buffer management for partial lines
+  - Support for text, thinking, and tool_use content blocks
+  - Deep copy of content blocks to prevent mutation issues
+  - `addUserMessage()` for adding user messages to streaming state
+  - `clearStreamingMessages()` for resetting state
+  - `streamingToConversation()` helper for converting streaming messages to ConversationMessage format
+- Integrated message streaming into `session-view.tsx`:
+  - Combined historical messages (from EventSource) with streaming messages (from WebSocket)
+  - User messages immediately appear when sent
+  - Assistant messages stream in real-time with content block updates
+  - Auto-scroll triggers on streaming message updates
+  - `isStreaming` state controls processing indicator
+- Added 23 tests (133 total) covering:
+  - Initial state (empty messages, isStreaming false)
+  - User message addition with unique IDs
+  - Assistant message event handling
+  - Content block start events (text, tool_use, thinking)
+  - Content block delta events (text_delta, thinking_delta, input_json_delta)
+  - Tool input JSON parsing on content_block_stop
+  - Message completion (message_stop, result events)
+  - Chunk buffering for partial lines
+  - Multi-line chunk processing
+  - Invalid JSON handling
+  - Non-string chunk filtering
+  - Clear streaming messages
+  - Multiple sequential assistant messages
+  - Streaming to conversation message conversion
+- Updated session-view tests to mock useMessageStream hook
+
+### Files Changed
+- `web/hooks/use-message-stream.ts` - New file: Message streaming hook
+- `web/hooks/use-message-stream.test.ts` - New file: Streaming hook tests
+- `web/components/session-view.tsx` - Integrated useMessageStream, combined message rendering
+- `web/components/session-view.test.tsx` - Added useMessageStream mock and new tests
+- `docs/PRD.md` - Marked task complete
+
