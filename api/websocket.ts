@@ -33,6 +33,7 @@ export interface ServerMessage {
   data?: string;
   reason?: string;
   message?: string;
+  [key: string]: unknown;
 }
 
 export interface ClientInfo {

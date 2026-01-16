@@ -24,7 +24,9 @@ import {
   onSessionChange,
   offSessionChange,
 } from "./watcher";
-import { initWebSocket, stopWebSocket } from "./websocket";
+import { initWebSocket, stopWebSocket, setMessageHandler } from "./websocket";
+import { handleSessionMessage, cleanupSessionHandler } from "./session-handler";
+import { killAllProcesses } from "./process-manager";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { readFileSync, existsSync } from "fs";
@@ -256,11 +258,14 @@ export function createServer(options: ServerOptions) {
       }) as HttpServer;
 
       initWebSocket(httpServer);
+      setMessageHandler(handleSessionMessage);
 
       return httpServer;
     },
     stop: () => {
       stopWatcher();
+      cleanupSessionHandler();
+      killAllProcesses();
       stopWebSocket();
       if (httpServer) {
         httpServer.close();

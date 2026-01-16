@@ -108,3 +108,45 @@
 - `api/process-manager.test.ts` - New file: Process manager tests
 - `api/websocket.test.ts` - Fixed flaky sendToSession test
 - `docs/PRD.md` - Marked task complete
+
+---
+
+## 2026-01-16: Phase 1 Task 4 - Test basic message round-trip
+
+### Completed
+- Created `api/session-handler.ts` with:
+  - `handleSessionMessage()` - Main message handler for WebSocket messages
+  - `session.start` handling: spawns Claude CLI, tracks client-process association
+  - `message.send` handling: forwards user messages to process stdin as JSON
+  - `session.interrupt` handling: sends SIGINT to interrupt running operations
+  - `session.close` handling: kills process and cleans up associations
+  - Process output forwarding: stdout/stderr to `assistant.chunk`, exit to `session.ended`
+  - Client-process bidirectional mapping for message routing
+  - Automatic cleanup on process exit/error
+- Integrated session handler with server:
+  - Set message handler on WebSocket initialization
+  - Added cleanup on server stop
+- Added index signature to `ServerMessage` for type compatibility
+- Added 15 new tests (57 total) covering:
+  - session.start spawns process and returns session.started
+  - sessionId passed for resume functionality
+  - projectPath passed to set working directory
+  - Client-process association tracking
+  - Killing existing process when starting new session
+  - message.send forwards to process stdin
+  - Error when sending without active session
+  - Error when content is missing
+  - session.interrupt sends SIGINT
+  - Error when interrupting without active session
+  - session.close kills process and sends session.ended
+  - stdout forwarding as assistant.chunk
+  - Process exit forwarding as session.ended
+  - Process error forwarding as error message
+  - Full message round-trip cycle
+
+### Files Changed
+- `api/session-handler.ts` - New file: WebSocket-to-process message handler
+- `api/session-handler.test.ts` - New file: Session handler tests with mocked process manager
+- `api/server.ts` - Integrated session handler and cleanup
+- `api/websocket.ts` - Added index signature to ServerMessage interface
+- `docs/PRD.md` - Marked task complete

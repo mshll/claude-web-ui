@@ -159,7 +159,7 @@ Browser                    Backend                     Claude CLI
 - [x] Add ws dependency, create WebSocket server
 - [x] Implement connection management (multiple clients)
 - [x] Add process-manager for spawning Claude CLI
-- [ ] Test basic message round-trip
+- [x] Test basic message round-trip
 
 ### Phase 2: Chat Mode Integration
 - [ ] Create chat-input component
