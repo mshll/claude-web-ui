@@ -65,3 +65,46 @@
 - `api/websocket.ts` - Added message types, handler registration, session tracking
 - `api/websocket.test.ts` - Added 13 new tests for connection management
 - `docs/PRD.md` - Marked task complete
+
+---
+
+## 2026-01-16: Phase 1 Task 3 - Add process-manager for spawning Claude CLI
+
+### Completed
+- Created `api/process-manager.ts` with:
+  - `spawnClaudeProcess()` - Spawns Claude CLI with JSON streaming flags
+  - Support for `--resume <sessionId>` to continue existing sessions
+  - Support for `--model <model>` to specify model
+  - `projectPath` option sets working directory
+  - Process lifecycle tracking (starting, running, stopped)
+  - `sendToProcess()` - Writes messages to process stdin
+  - `interruptProcess()` - Sends SIGINT to interrupt current operation
+  - `killProcess()` - Sends SIGTERM and removes from tracking
+  - `killAllProcesses()` - Cleanup for all active processes
+  - Event-based output handling via `onProcessOutput()`/`offProcessOutput()`
+  - Max concurrent processes limit (10)
+  - Automatic cleanup on process exit or error
+- Fixed flaky test in websocket.test.ts (race condition in client ID ordering)
+- Added 22 new tests (42 total) covering:
+  - Process spawning with default args
+  - Resume flag with sessionId
+  - Model flag
+  - Project path as cwd
+  - Process info storage
+  - Process count tracking
+  - Max concurrent processes limit
+  - stdout/stderr event emission
+  - Status updates on output
+  - Exit and error event handling
+  - Output handler registration/removal
+  - stdin writing
+  - SIGINT interrupt
+  - SIGTERM kill
+  - Active process listing
+  - Kill all processes
+
+### Files Changed
+- `api/process-manager.ts` - New file: Claude CLI process management
+- `api/process-manager.test.ts` - New file: Process manager tests
+- `api/websocket.test.ts` - Fixed flaky sendToSession test
+- `docs/PRD.md` - Marked task complete

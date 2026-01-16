@@ -158,7 +158,7 @@ Browser                    Backend                     Claude CLI
 ### Phase 1: WebSocket Infrastructure
 - [x] Add ws dependency, create WebSocket server
 - [x] Implement connection management (multiple clients)
-- [ ] Add process-manager for spawning Claude CLI
+- [x] Add process-manager for spawning Claude CLI
 - [ ] Test basic message round-trip
 
 ### Phase 2: Chat Mode Integration

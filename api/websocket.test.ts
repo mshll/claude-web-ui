@@ -351,9 +351,16 @@ describe("WebSocket Server", () => {
       const ws2 = new WebSocket(`ws://localhost:${port}/ws`);
       const ws3 = new WebSocket(`ws://localhost:${port}/ws`);
 
-      await Promise.all([waitForOpen(ws1), waitForOpen(ws2), waitForOpen(ws3)]);
+      const [msg1, msg2, msg3] = await Promise.all([
+        waitForMessage(ws1),
+        waitForMessage(ws2),
+        waitForMessage(ws3),
+      ]) as Array<{ type: string; clientId: string }>;
 
-      const [clientId1, clientId2, clientId3] = getConnectedClients();
+      const clientId1 = msg1.clientId;
+      const clientId2 = msg2.clientId;
+      const clientId3 = msg3.clientId;
+
       associateClientWithSession(clientId1, "session-1");
       associateClientWithSession(clientId2, "session-1");
       associateClientWithSession(clientId3, "session-2");
