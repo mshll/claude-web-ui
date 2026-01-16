@@ -27,3 +27,41 @@
 - `api/websocket.test.ts` - New file: WebSocket server tests
 - `vitest.config.ts` - New file: Test configuration
 - `docs/PRD.md` - Marked task complete
+
+---
+
+## 2026-01-16: Phase 1 Task 2 - Implement connection management (multiple clients)
+
+### Completed
+- Added message types for client-server communication:
+  - `ClientMessage` interface for incoming messages (session.start, message.send, session.interrupt, mode.switch, session.close)
+  - `ServerMessage` interface for outgoing messages (connected, session.started, assistant.chunk, terminal.output, session.ended, error)
+  - `MessageHandler` type for registering message handlers
+- Implemented message handling and routing:
+  - `handleClientMessage()` parses JSON and routes to registered handler
+  - Error responses for invalid JSON and missing message type
+  - Synchronous and async handler error catching
+- Implemented session-client association tracking:
+  - `sessionClients` Map tracks which clients are in each session
+  - `associateClientWithSession()` links client to a session
+  - `dissociateClientFromSession()` removes client from session
+  - `getClientsBySession()` returns all clients in a session
+  - `getClientSession()` returns the session a client is in
+  - `sendToSession()` broadcasts to all clients in a session
+  - `getActiveSessions()` returns list of active session IDs
+- Proper cleanup: clients removed from session tracking on disconnect
+- Added 13 new tests (20 total) covering:
+  - Message handler invocation
+  - Invalid JSON error response
+  - Missing type error response
+  - Handler error catching
+  - Session-client association/dissociation
+  - Multiple clients per session
+  - Client session switching
+  - Session cleanup on disconnect
+  - Session-targeted messaging
+
+### Files Changed
+- `api/websocket.ts` - Added message types, handler registration, session tracking
+- `api/websocket.test.ts` - Added 13 new tests for connection management
+- `docs/PRD.md` - Marked task complete
