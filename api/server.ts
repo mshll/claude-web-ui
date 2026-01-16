@@ -3,7 +3,7 @@ import { cors } from "hono/cors";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { streamSSE } from "hono/streaming";
 import { serve } from "@hono/node-server";
-import type { ServerType } from "@hono/node-server";
+import type { Server as HttpServer } from "http";
 import {
   initStorage,
   loadStorage,
@@ -24,6 +24,7 @@ import {
   onSessionChange,
   offSessionChange,
 } from "./watcher";
+import { initWebSocket, stopWebSocket } from "./websocket";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { readFileSync, existsSync } from "fs";
@@ -235,7 +236,7 @@ export function createServer(options: ServerOptions) {
 
   startWatcher();
 
-  let httpServer: ServerType | null = null;
+  let httpServer: HttpServer | null = null;
 
   return {
     app,
@@ -252,12 +253,15 @@ export function createServer(options: ServerOptions) {
       httpServer = serve({
         fetch: app.fetch,
         port,
-      });
+      }) as HttpServer;
+
+      initWebSocket(httpServer);
 
       return httpServer;
     },
     stop: () => {
       stopWatcher();
+      stopWebSocket();
       if (httpServer) {
         httpServer.close();
       }

@@ -18,6 +18,8 @@
     "build:web": "vite build --config web/vite.config.ts",
     "build:server": "tsup api/index.ts --format esm --dts --clean",
     "start": "node dist/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "prepublishOnly": "pnpm build"
   },
   "dependencies": {
@@ -32,13 +34,15 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-markdown": "^10.1.0",
-    "remark-gfm": "^4.0.1"
+    "remark-gfm": "^4.0.1",
+    "ws": "^8.19.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.0.7",
     "@types/node": "^22.10.5",
     "@types/react": "^19.0.7",
     "@types/react-dom": "^19.0.3",
+    "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^4.3.4",
     "concurrently": "^9.1.2",
     "prettier": "^3.7.4",
@@ -46,7 +50,8 @@
     "tsup": "^8.3.5",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",
-    "vite": "^6.0.11"
+    "vite": "^6.0.11",
+    "vitest": "^4.0.17"
   },
   "engines": {
     "node": ">=20.0.0"

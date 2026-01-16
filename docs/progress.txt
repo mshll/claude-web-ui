@@ -1,0 +1,29 @@
+## 2026-01-16: Phase 1 Task 1 - Add ws dependency, create WebSocket server
+
+### Completed
+- Added `ws` and `@types/ws` dependencies to package.json
+- Created `api/websocket.ts` with:
+  - WebSocket server initialization on `/ws` path
+  - Client connection management with unique client IDs
+  - Heartbeat mechanism (ping/pong) every 30 seconds
+  - `sendToClient()` for targeted messaging
+  - `broadcast()` for sending to all connected clients
+  - `getConnectedClients()` and `getClientCount()` utility functions
+  - Proper cleanup on `stopWebSocket()`
+- Integrated WebSocket server with HTTP server in `api/server.ts`
+- Added `vitest` for testing with 7 passing tests covering:
+  - Server initialization
+  - Client connections
+  - Connected message delivery
+  - Multiple client handling
+  - Client disconnect cleanup
+  - Broadcast messaging
+  - Cleanup on stop
+
+### Files Changed
+- `package.json` - Added ws, @types/ws, vitest dependencies; added test scripts
+- `api/websocket.ts` - New file: WebSocket server implementation
+- `api/server.ts` - Integrated WebSocket initialization and cleanup
+- `api/websocket.test.ts` - New file: WebSocket server tests
+- `vitest.config.ts` - New file: Test configuration
+- `docs/PRD.md` - Marked task complete
