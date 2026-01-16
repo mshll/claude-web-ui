@@ -150,3 +150,45 @@
 - `api/server.ts` - Integrated session handler and cleanup
 - `api/websocket.ts` - Added index signature to ServerMessage interface
 - `docs/PRD.md` - Marked task complete
+
+---
+
+## 2026-01-16: Phase 2 Task 1 - Create chat-input component
+
+### Completed
+- Created `web/components/chat-input.tsx` with:
+  - Text input area with auto-resizing height
+  - Send button with cyan styling
+  - Interrupt button (red, square icon) shown during processing
+  - Submit on Enter, newline on Shift+Enter
+  - Disabled state support
+  - Input validation (trims whitespace, rejects empty)
+  - Clears input after successful send
+  - Helpful hint text below input
+- Added React testing dependencies:
+  - `@testing-library/react` for component rendering
+  - `@testing-library/user-event` for user interaction simulation
+  - `@testing-library/dom` for DOM utilities
+  - `jsdom` for browser environment in tests
+- Updated vitest configuration for React component testing
+- Added 15 tests (72 total) covering:
+  - Rendering with default and custom placeholder
+  - onSend callback when clicking send button
+  - Input clearing after send
+  - Enter key submission
+  - Shift+Enter for newline (no submission)
+  - Empty input rejection
+  - Whitespace-only input rejection
+  - Whitespace trimming
+  - Disabled state rendering and behavior
+  - Interrupt button visibility
+  - Send button hiding during processing
+  - onInterrupt callback
+  - Fallback to send button without onInterrupt
+
+### Files Changed
+- `web/components/chat-input.tsx` - New file: Chat input component
+- `web/components/chat-input.test.tsx` - New file: Component tests
+- `package.json` - Added testing-library and jsdom dependencies
+- `vitest.config.ts` - Added React plugin and jsdom environment support
+- `docs/PRD.md` - Marked task complete

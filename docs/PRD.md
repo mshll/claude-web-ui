@@ -162,7 +162,7 @@ Browser                    Backend                     Claude CLI
 - [x] Test basic message round-trip
 
 ### Phase 2: Chat Mode Integration
-- [ ] Create chat-input component
+- [x] Create chat-input component
 - [ ] Implement use-websocket hook
 - [ ] Integrate with session-view
 - [ ] Handle message streaming and rendering
