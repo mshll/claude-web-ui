@@ -3,6 +3,7 @@ import type { ConversationMessage } from "@claude-run/api";
 import MessageBlock from "./message-block";
 import ScrollToBottomButton from "./scroll-to-bottom-button";
 import { ChatInput } from "./chat-input";
+import { ConnectionStatusIndicator } from "./connection-status";
 import { useWebSocket } from "../hooks/use-websocket";
 import { useMessageStream, streamingToConversation } from "../hooks/use-message-stream";
 
@@ -202,6 +203,9 @@ function SessionView(props: SessionViewProps) {
 
   return (
     <div className="relative flex h-full flex-col">
+      <div className="flex items-center justify-end border-b border-zinc-800/60 bg-zinc-900/50 px-4 py-2">
+        <ConnectionStatusIndicator status={wsStatus} />
+      </div>
       <div
         ref={containerRef}
         onScroll={handleScroll}
