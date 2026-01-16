@@ -8,11 +8,15 @@ export interface ClientMessage {
     | "message.send"
     | "session.interrupt"
     | "mode.switch"
-    | "session.close";
+    | "session.close"
+    | "terminal.input"
+    | "terminal.resize";
   sessionId?: string;
   projectPath?: string;
   content?: string;
   mode?: "chat" | "terminal";
+  cols?: number;
+  rows?: number;
 }
 
 export interface ServerMessage {
@@ -47,11 +51,19 @@ export interface UseWebSocketReturn {
   clientId: string | null;
   activeSessionId: string | null;
   send: (message: ClientMessage) => boolean;
-  startSession: (sessionId?: string, projectPath?: string) => boolean;
+  startSession: (
+    sessionId?: string,
+    projectPath?: string,
+    mode?: "chat" | "terminal",
+    cols?: number,
+    rows?: number
+  ) => boolean;
   sendMessage: (content: string) => boolean;
   interrupt: () => boolean;
   closeSession: () => boolean;
-  switchMode: (mode: "chat" | "terminal") => boolean;
+  switchMode: (mode: "chat" | "terminal", cols?: number, rows?: number) => boolean;
+  sendTerminalInput: (data: string) => boolean;
+  resizeTerminal: (cols: number, rows: number) => boolean;
 }
 
 export function useWebSocket(
@@ -198,11 +210,20 @@ export function useWebSocket(
   }, []);
 
   const startSession = useCallback(
-    (sessionId?: string, projectPath?: string): boolean => {
+    (
+      sessionId?: string,
+      projectPath?: string,
+      mode?: "chat" | "terminal",
+      cols?: number,
+      rows?: number
+    ): boolean => {
       return send({
         type: "session.start",
         sessionId,
         projectPath,
+        mode,
+        cols,
+        rows,
       });
     },
     [send]
@@ -227,8 +248,22 @@ export function useWebSocket(
   }, [send]);
 
   const switchMode = useCallback(
-    (mode: "chat" | "terminal"): boolean => {
-      return send({ type: "mode.switch", mode });
+    (mode: "chat" | "terminal", cols?: number, rows?: number): boolean => {
+      return send({ type: "mode.switch", mode, cols, rows });
+    },
+    [send]
+  );
+
+  const sendTerminalInput = useCallback(
+    (data: string): boolean => {
+      return send({ type: "terminal.input", content: data });
+    },
+    [send]
+  );
+
+  const resizeTerminal = useCallback(
+    (cols: number, rows: number): boolean => {
+      return send({ type: "terminal.resize", cols, rows });
     },
     [send]
   );
@@ -243,5 +278,7 @@ export function useWebSocket(
     interrupt,
     closeSession,
     switchMode,
+    sendTerminalInput,
+    resizeTerminal,
   };
 }

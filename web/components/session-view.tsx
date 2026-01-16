@@ -1,16 +1,23 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import type { ConversationMessage } from "@claude-run/api";
+import { MessageSquare, Terminal as TerminalIcon } from "lucide-react";
 import MessageBlock from "./message-block";
 import ScrollToBottomButton from "./scroll-to-bottom-button";
 import { ChatInput } from "./chat-input";
 import { ConnectionStatusIndicator } from "./connection-status";
+import { TerminalView, useTerminalWriter } from "./terminal-view";
 import { useWebSocket } from "../hooks/use-websocket";
-import { useMessageStream, streamingToConversation } from "../hooks/use-message-stream";
+import {
+  useMessageStream,
+  streamingToConversation,
+} from "../hooks/use-message-stream";
 
 const MAX_RETRIES = 10;
 const BASE_RETRY_DELAY_MS = 1000;
 const MAX_RETRY_DELAY_MS = 30000;
 const SCROLL_THRESHOLD_PX = 100;
+
+type ViewMode = "chat" | "terminal";
 
 interface SessionViewProps {
   sessionId?: string;
@@ -22,12 +29,56 @@ function getWebSocketUrl(): string {
   return `${protocol}//${window.location.host}/ws`;
 }
 
+interface ModeToggleProps {
+  mode: ViewMode;
+  onModeChange: (mode: ViewMode) => void;
+  disabled?: boolean;
+}
+
+function ModeToggle({ mode, onModeChange, disabled }: ModeToggleProps) {
+  return (
+    <div className="flex items-center gap-1 rounded-lg bg-zinc-800/50 p-1">
+      <button
+        type="button"
+        onClick={() => onModeChange("chat")}
+        disabled={disabled}
+        className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
+          mode === "chat"
+            ? "bg-zinc-700 text-zinc-100"
+            : "text-zinc-400 hover:text-zinc-200"
+        } ${disabled ? "cursor-not-allowed opacity-50" : ""}`}
+        aria-pressed={mode === "chat"}
+        data-testid="mode-toggle-chat"
+      >
+        <MessageSquare className="h-3.5 w-3.5" />
+        Chat
+      </button>
+      <button
+        type="button"
+        onClick={() => onModeChange("terminal")}
+        disabled={disabled}
+        className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
+          mode === "terminal"
+            ? "bg-zinc-700 text-zinc-100"
+            : "text-zinc-400 hover:text-zinc-200"
+        } ${disabled ? "cursor-not-allowed opacity-50" : ""}`}
+        aria-pressed={mode === "terminal"}
+        data-testid="mode-toggle-terminal"
+      >
+        <TerminalIcon className="h-3.5 w-3.5" />
+        Terminal
+      </button>
+    </div>
+  );
+}
+
 function SessionView(props: SessionViewProps) {
   const { sessionId, projectPath } = props;
 
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [autoScroll, setAutoScroll] = useState(true);
+  const [viewMode, setViewMode] = useState<ViewMode>("chat");
   const containerRef = useRef<HTMLDivElement>(null);
   const lastMessageRef = useRef<HTMLDivElement>(null);
   const offsetRef = useRef(0);
@@ -36,6 +87,9 @@ function SessionView(props: SessionViewProps) {
   const eventSourceRef = useRef<EventSource | null>(null);
   const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const mountedRef = useRef(true);
+  const terminalDimensionsRef = useRef({ cols: 120, rows: 30 });
+
+  const { setTerminal, write: writeToTerminal } = useTerminalWriter();
 
   const {
     streamingMessages,
@@ -51,12 +105,18 @@ function SessionView(props: SessionViewProps) {
     startSession,
     sendMessage,
     interrupt,
+    switchMode,
+    sendTerminalInput,
+    resizeTerminal,
   } = useWebSocket(getWebSocketUrl(), {
     onSessionStarted: () => {
-      // Session started, ready for messages
+      // Session started
     },
     onAssistantChunk: (chunk) => {
       handleChunk(chunk);
+    },
+    onTerminalOutput: (data) => {
+      writeToTerminal(data);
     },
     onSessionEnded: () => {
       // Session ended
@@ -105,7 +165,10 @@ function SessionView(props: SessionViewProps) {
       }
 
       if (retryCountRef.current < MAX_RETRIES) {
-        const delay = Math.min(BASE_RETRY_DELAY_MS * Math.pow(2, retryCountRef.current), MAX_RETRY_DELAY_MS);
+        const delay = Math.min(
+          BASE_RETRY_DELAY_MS * Math.pow(2, retryCountRef.current),
+          MAX_RETRY_DELAY_MS
+        );
         retryCountRef.current++;
         retryTimeoutRef.current = setTimeout(() => connect(), delay);
       }
@@ -156,26 +219,75 @@ function SessionView(props: SessionViewProps) {
     }
 
     const { scrollTop, scrollHeight, clientHeight } = containerRef.current;
-    const isAtBottom = scrollHeight - scrollTop - clientHeight < SCROLL_THRESHOLD_PX;
+    const isAtBottom =
+      scrollHeight - scrollTop - clientHeight < SCROLL_THRESHOLD_PX;
     setAutoScroll(isAtBottom);
   };
 
-  const handleSendMessage = useCallback((content: string) => {
-    if (wsStatus !== "connected") {
-      return;
-    }
+  const handleSendMessage = useCallback(
+    (content: string) => {
+      if (wsStatus !== "connected") {
+        return;
+      }
 
-    if (!activeSessionId) {
-      startSession(sessionId, projectPath);
-    }
+      if (!activeSessionId) {
+        startSession(sessionId, projectPath, "chat");
+      }
 
-    addUserMessage(content);
-    sendMessage(content);
-  }, [wsStatus, activeSessionId, sessionId, projectPath, startSession, sendMessage, addUserMessage]);
+      addUserMessage(content);
+      sendMessage(content);
+    },
+    [
+      wsStatus,
+      activeSessionId,
+      sessionId,
+      projectPath,
+      startSession,
+      sendMessage,
+      addUserMessage,
+    ]
+  );
 
   const handleInterrupt = useCallback(() => {
     interrupt();
   }, [interrupt]);
+
+  const handleModeChange = useCallback(
+    (newMode: ViewMode) => {
+      if (newMode === viewMode) return;
+      setViewMode(newMode);
+
+      if (activeSessionId) {
+        const { cols, rows } = terminalDimensionsRef.current;
+        switchMode(newMode, cols, rows);
+      }
+    },
+    [viewMode, activeSessionId, switchMode]
+  );
+
+  const handleTerminalInput = useCallback(
+    (data: string) => {
+      if (wsStatus !== "connected") return;
+
+      if (!activeSessionId) {
+        const { cols, rows } = terminalDimensionsRef.current;
+        startSession(sessionId, projectPath, "terminal", cols, rows);
+      }
+
+      sendTerminalInput(data);
+    },
+    [wsStatus, activeSessionId, sessionId, projectPath, startSession, sendTerminalInput]
+  );
+
+  const handleTerminalResize = useCallback(
+    (cols: number, rows: number) => {
+      terminalDimensionsRef.current = { cols, rows };
+      if (activeSessionId && viewMode === "terminal") {
+        resizeTerminal(cols, rows);
+      }
+    },
+    [activeSessionId, viewMode, resizeTerminal]
+  );
 
   const summary = messages.find((m) => m.type === "summary");
   const historicalMessages = messages.filter(
@@ -204,59 +316,77 @@ function SessionView(props: SessionViewProps) {
 
   return (
     <div className="relative flex h-full flex-col">
-      <div className="flex items-center justify-end border-b border-zinc-800/60 bg-zinc-900/50 px-4 py-2">
+      <div className="flex items-center justify-between border-b border-zinc-800/60 bg-zinc-900/50 px-4 py-2">
+        <ModeToggle
+          mode={viewMode}
+          onModeChange={handleModeChange}
+          disabled={!isConnected}
+        />
         <ConnectionStatusIndicator status={wsStatus} />
       </div>
-      <div
-        ref={containerRef}
-        onScroll={handleScroll}
-        className="flex-1 overflow-y-auto bg-zinc-950"
-      >
-        <div className="mx-auto max-w-3xl px-4 py-4">
-          {summary && (
-            <div className="mb-6 rounded-xl border border-zinc-800/60 bg-zinc-900/50 p-4">
-              <h2 className="text-sm font-medium text-zinc-200 leading-relaxed">
-                {summary.summary}
-              </h2>
-              <p className="mt-2 text-[11px] text-zinc-500">
-                {allMessages.length} messages
-              </p>
+
+      {viewMode === "chat" ? (
+        <>
+          <div
+            ref={containerRef}
+            onScroll={handleScroll}
+            className="flex-1 overflow-y-auto bg-zinc-950"
+          >
+            <div className="mx-auto max-w-3xl px-4 py-4">
+              {summary && (
+                <div className="mb-6 rounded-xl border border-zinc-800/60 bg-zinc-900/50 p-4">
+                  <h2 className="text-sm font-medium text-zinc-200 leading-relaxed">
+                    {summary.summary}
+                  </h2>
+                  <p className="mt-2 text-[11px] text-zinc-500">
+                    {allMessages.length} messages
+                  </p>
+                </div>
+              )}
+
+              <div className="flex flex-col gap-2">
+                {allMessages.map((message, index) => (
+                  <div
+                    key={message.uuid || index}
+                    ref={
+                      index === allMessages.length - 1
+                        ? lastMessageRef
+                        : undefined
+                    }
+                  >
+                    <MessageBlock message={message} />
+                  </div>
+                ))}
+              </div>
             </div>
+          </div>
+
+          {!autoScroll && (
+            <ScrollToBottomButton
+              onClick={() => {
+                setAutoScroll(true);
+                scrollToBottom();
+              }}
+            />
           )}
 
-          <div className="flex flex-col gap-2">
-            {allMessages.map((message, index) => (
-              <div
-                key={message.uuid || index}
-                ref={
-                  index === allMessages.length - 1
-                    ? lastMessageRef
-                    : undefined
-                }
-              >
-                <MessageBlock message={message} />
-              </div>
-            ))}
-          </div>
+          <ChatInput
+            onSend={handleSendMessage}
+            onInterrupt={handleInterrupt}
+            disabled={!isConnected}
+            isProcessing={isStreaming}
+            placeholder={isConnected ? "Send a message..." : "Connecting..."}
+          />
+        </>
+      ) : (
+        <div className="flex-1 overflow-hidden">
+          <TerminalView
+            onInput={handleTerminalInput}
+            onResize={handleTerminalResize}
+            onReady={setTerminal}
+          />
         </div>
-      </div>
-
-      {!autoScroll && (
-        <ScrollToBottomButton
-          onClick={() => {
-            setAutoScroll(true);
-            scrollToBottom();
-          }}
-        />
       )}
-
-      <ChatInput
-        onSend={handleSendMessage}
-        onInterrupt={handleInterrupt}
-        disabled={!isConnected}
-        isProcessing={isStreaming}
-        placeholder={isConnected ? "Send a message..." : "Connecting..."}
-      />
     </div>
   );
 }

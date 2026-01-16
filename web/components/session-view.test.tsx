@@ -69,6 +69,8 @@ describe("SessionView", () => {
       interrupt: vi.fn().mockReturnValue(true),
       closeSession: vi.fn().mockReturnValue(true),
       switchMode: vi.fn().mockReturnValue(true),
+      sendTerminalInput: vi.fn().mockReturnValue(true),
+      resizeTerminal: vi.fn().mockReturnValue(true),
     });
 
     mockUseMessageStream.mockReturnValue({
@@ -128,6 +130,8 @@ describe("SessionView", () => {
       interrupt: vi.fn().mockReturnValue(false),
       closeSession: vi.fn().mockReturnValue(false),
       switchMode: vi.fn().mockReturnValue(false),
+      sendTerminalInput: vi.fn().mockReturnValue(false),
+      resizeTerminal: vi.fn().mockReturnValue(false),
     });
 
     render(<SessionView sessionId="test-session" />);
@@ -151,6 +155,8 @@ describe("SessionView", () => {
       interrupt: vi.fn().mockReturnValue(false),
       closeSession: vi.fn().mockReturnValue(false),
       switchMode: vi.fn().mockReturnValue(false),
+      sendTerminalInput: vi.fn().mockReturnValue(false),
+      resizeTerminal: vi.fn().mockReturnValue(false),
     });
 
     render(<SessionView sessionId="test-session" />);
@@ -179,6 +185,8 @@ describe("SessionView", () => {
       interrupt: vi.fn().mockReturnValue(true),
       closeSession: vi.fn().mockReturnValue(true),
       switchMode: vi.fn().mockReturnValue(true),
+      sendTerminalInput: vi.fn().mockReturnValue(true),
+      resizeTerminal: vi.fn().mockReturnValue(true),
     });
 
     mockUseMessageStream.mockReturnValue({
@@ -204,7 +212,7 @@ describe("SessionView", () => {
     const sendButton = screen.getByTitle("Send message");
     fireEvent.click(sendButton);
 
-    expect(mockStartSession).toHaveBeenCalledWith("test-session", "/test/project");
+    expect(mockStartSession).toHaveBeenCalledWith("test-session", "/test/project", "chat");
     expect(mockSendMessage).toHaveBeenCalledWith("Hello Claude");
     expect(mockAddUserMessage).toHaveBeenCalledWith("Hello Claude");
   });
@@ -223,6 +231,8 @@ describe("SessionView", () => {
       interrupt: vi.fn().mockReturnValue(true),
       closeSession: vi.fn().mockReturnValue(true),
       switchMode: vi.fn().mockReturnValue(true),
+      sendTerminalInput: vi.fn().mockReturnValue(true),
+      resizeTerminal: vi.fn().mockReturnValue(true),
     });
 
     render(<SessionView sessionId="test-session" projectPath="/test/project" />);
@@ -258,6 +268,8 @@ describe("SessionView", () => {
       interrupt: mockInterrupt,
       closeSession: vi.fn().mockReturnValue(true),
       switchMode: vi.fn().mockReturnValue(true),
+      sendTerminalInput: vi.fn().mockReturnValue(true),
+      resizeTerminal: vi.fn().mockReturnValue(true),
     });
 
     mockUseMessageStream.mockReturnValue({
@@ -346,6 +358,8 @@ describe("SessionView", () => {
         interrupt: vi.fn().mockReturnValue(true),
         closeSession: vi.fn().mockReturnValue(true),
         switchMode: vi.fn().mockReturnValue(true),
+        sendTerminalInput: vi.fn().mockReturnValue(true),
+        resizeTerminal: vi.fn().mockReturnValue(true),
       };
     });
 

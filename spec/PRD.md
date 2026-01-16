@@ -164,8 +164,8 @@ Browser                    Backend                     Claude CLI
 ### Phase 3: Session Management (Complete)
 - [x] Session lifecycle: new session creation modal, resume from viewer, active indicators in session list, graceful shutdown
 
-### Phase 4: Terminal Mode
-- [ ] Terminal view: add node-pty + xterm.js, create terminal-view component with PTY bridge, add mode toggle UI
+### Phase 4: Terminal Mode (Complete)
+- [x] Terminal view: add node-pty + xterm.js, create terminal-view component with PTY bridge, add mode toggle UI
 
 ### Phase 5: Polish
 - [ ] Robustness: error handling, reconnection logic, multi-tab support

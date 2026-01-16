@@ -12,11 +12,15 @@ export interface ClientMessage {
     | "message.send"
     | "session.interrupt"
     | "mode.switch"
-    | "session.close";
+    | "session.close"
+    | "terminal.input"
+    | "terminal.resize";
   sessionId?: string;
   projectPath?: string;
   content?: string;
   mode?: "chat" | "terminal";
+  cols?: number;
+  rows?: number;
 }
 
 export interface ServerMessage {

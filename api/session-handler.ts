@@ -5,7 +5,6 @@ import {
   sendToSession,
   associateClientWithSession,
   dissociateClientFromSession,
-  getClientSession,
 } from "./websocket";
 import {
   spawnClaudeProcess,
@@ -15,29 +14,45 @@ import {
   onProcessOutput,
   offProcessOutput,
   type ProcessInfo,
-  type OutputHandler,
 } from "./process-manager";
+import {
+  spawnClaudePty,
+  writeToPty,
+  resizePty,
+  killPty,
+  onPtyOutput,
+  offPtyOutput,
+  type PtyInfo,
+} from "./pty-manager";
 
-interface ClientProcess {
-  processId: string;
+type SessionMode = "chat" | "terminal";
+
+interface ClientSession {
+  mode: SessionMode;
+  processId?: string;
+  ptyId?: string;
   sessionId?: string;
 }
 
-const clientProcesses = new Map<string, ClientProcess>();
+const clientSessions = new Map<string, ClientSession>();
 const processClients = new Map<string, string>();
+const ptyClients = new Map<string, string>();
 
-function handleProcessOutput(processId: string, output: {
-  type: "stdout" | "stderr" | "exit" | "error";
-  data?: string;
-  code?: number | null;
-  signal?: string | null;
-  error?: string;
-}): void {
+function handleProcessOutput(
+  processId: string,
+  output: {
+    type: "stdout" | "stderr" | "exit" | "error";
+    data?: string;
+    code?: number | null;
+    signal?: string | null;
+    error?: string;
+  }
+): void {
   const clientId = processClients.get(processId);
   if (!clientId) return;
 
-  const clientProcess = clientProcesses.get(clientId);
-  const sessionId = clientProcess?.sessionId;
+  const clientSession = clientSessions.get(clientId);
+  const sessionId = clientSession?.sessionId;
 
   if (output.type === "stdout" || output.type === "stderr") {
     const message: ServerMessage = {
@@ -53,7 +68,9 @@ function handleProcessOutput(processId: string, output: {
   } else if (output.type === "exit") {
     const message: ServerMessage = {
       type: "session.ended",
-      reason: output.signal ? `Signal: ${output.signal}` : `Exit code: ${output.code}`,
+      reason: output.signal
+        ? `Signal: ${output.signal}`
+        : `Exit code: ${output.code}`,
     };
 
     if (sessionId) {
@@ -62,7 +79,7 @@ function handleProcessOutput(processId: string, output: {
       sendToClient(clientId, message);
     }
 
-    cleanupClientProcess(clientId);
+    cleanupClientSession(clientId);
   } else if (output.type === "error") {
     const message: ServerMessage = {
       type: "error",
@@ -70,24 +87,75 @@ function handleProcessOutput(processId: string, output: {
     };
 
     sendToClient(clientId, message);
-    cleanupClientProcess(clientId);
+    cleanupClientSession(clientId);
   }
 }
 
-function cleanupClientProcess(clientId: string): void {
-  const clientProcess = clientProcesses.get(clientId);
-  if (clientProcess) {
-    processClients.delete(clientProcess.processId);
-    clientProcesses.delete(clientId);
+function handlePtyOutput(
+  ptyId: string,
+  output: {
+    type: "data" | "exit";
+    data?: string;
+    exitCode?: number;
+  }
+): void {
+  const clientId = ptyClients.get(ptyId);
+  if (!clientId) return;
+
+  const clientSession = clientSessions.get(clientId);
+  const sessionId = clientSession?.sessionId;
+
+  if (output.type === "data") {
+    const message: ServerMessage = {
+      type: "terminal.output",
+      data: output.data,
+    };
+
+    if (sessionId) {
+      sendToSession(sessionId, message);
+    } else {
+      sendToClient(clientId, message);
+    }
+  } else if (output.type === "exit") {
+    const message: ServerMessage = {
+      type: "session.ended",
+      reason: `Exit code: ${output.exitCode}`,
+    };
+
+    if (sessionId) {
+      sendToSession(sessionId, message);
+    } else {
+      sendToClient(clientId, message);
+    }
+
+    cleanupClientSession(clientId);
   }
 }
 
-let outputHandlerRegistered = false;
+function cleanupClientSession(clientId: string): void {
+  const clientSession = clientSessions.get(clientId);
+  if (clientSession) {
+    if (clientSession.processId) {
+      processClients.delete(clientSession.processId);
+    }
+    if (clientSession.ptyId) {
+      ptyClients.delete(clientSession.ptyId);
+    }
+    clientSessions.delete(clientId);
+  }
+}
 
-function ensureOutputHandler(): void {
-  if (!outputHandlerRegistered) {
+let processOutputHandlerRegistered = false;
+let ptyOutputHandlerRegistered = false;
+
+function ensureOutputHandlers(): void {
+  if (!processOutputHandlerRegistered) {
     onProcessOutput(handleProcessOutput);
-    outputHandlerRegistered = true;
+    processOutputHandlerRegistered = true;
+  }
+  if (!ptyOutputHandlerRegistered) {
+    onPtyOutput(handlePtyOutput);
+    ptyOutputHandlerRegistered = true;
   }
 }
 
@@ -95,7 +163,7 @@ export function handleSessionMessage(
   clientId: string,
   message: ClientMessage
 ): void {
-  ensureOutputHandler();
+  ensureOutputHandlers();
 
   switch (message.type) {
     case "session.start":
@@ -111,56 +179,101 @@ export function handleSessionMessage(
       handleSessionClose(clientId);
       break;
     case "mode.switch":
+      handleModeSwitch(clientId, message);
+      break;
+    case "terminal.input":
+      handleTerminalInput(clientId, message);
+      break;
+    case "terminal.resize":
+      handleTerminalResize(clientId, message);
       break;
   }
 }
 
-function handleSessionStart(
-  clientId: string,
-  message: ClientMessage
-): void {
-  const existingProcess = clientProcesses.get(clientId);
-  if (existingProcess) {
-    killProcess(existingProcess.processId);
-    cleanupClientProcess(clientId);
+function handleSessionStart(clientId: string, message: ClientMessage): void {
+  const existingSession = clientSessions.get(clientId);
+  if (existingSession) {
+    if (existingSession.processId) {
+      killProcess(existingSession.processId);
+    }
+    if (existingSession.ptyId) {
+      killPty(existingSession.ptyId);
+    }
+    cleanupClientSession(clientId);
   }
 
-  let processInfo: ProcessInfo;
-  try {
-    processInfo = spawnClaudeProcess({
+  const mode: SessionMode = message.mode || "chat";
+
+  if (mode === "terminal") {
+    let ptyInfo: PtyInfo;
+    try {
+      ptyInfo = spawnClaudePty({
+        sessionId: message.sessionId,
+        projectPath: message.projectPath,
+        cols: message.cols,
+        rows: message.rows,
+      });
+    } catch (err) {
+      sendToClient(clientId, {
+        type: "error",
+        message: err instanceof Error ? err.message : "Failed to start session",
+      });
+      return;
+    }
+
+    clientSessions.set(clientId, {
+      mode: "terminal",
+      ptyId: ptyInfo.id,
       sessionId: message.sessionId,
-      projectPath: message.projectPath,
     });
-  } catch (err) {
+    ptyClients.set(ptyInfo.id, clientId);
+
+    if (message.sessionId) {
+      associateClientWithSession(clientId, message.sessionId);
+    }
+
     sendToClient(clientId, {
-      type: "error",
-      message: err instanceof Error ? err.message : "Failed to start session",
+      type: "session.started",
+      sessionId: message.sessionId || ptyInfo.id,
+      mode: "terminal",
     });
-    return;
+  } else {
+    let processInfo: ProcessInfo;
+    try {
+      processInfo = spawnClaudeProcess({
+        sessionId: message.sessionId,
+        projectPath: message.projectPath,
+      });
+    } catch (err) {
+      sendToClient(clientId, {
+        type: "error",
+        message: err instanceof Error ? err.message : "Failed to start session",
+      });
+      return;
+    }
+
+    clientSessions.set(clientId, {
+      mode: "chat",
+      processId: processInfo.id,
+      sessionId: message.sessionId,
+    });
+    processClients.set(processInfo.id, clientId);
+
+    if (message.sessionId) {
+      associateClientWithSession(clientId, message.sessionId);
+    }
+
+    sendToClient(clientId, {
+      type: "session.started",
+      sessionId: message.sessionId || processInfo.id,
+      mode: "chat",
+    });
   }
-
-  clientProcesses.set(clientId, {
-    processId: processInfo.id,
-    sessionId: message.sessionId,
-  });
-  processClients.set(processInfo.id, clientId);
-
-  if (message.sessionId) {
-    associateClientWithSession(clientId, message.sessionId);
-  }
-
-  sendToClient(clientId, {
-    type: "session.started",
-    sessionId: message.sessionId || processInfo.id,
-  });
 }
 
-function handleMessageSend(
-  clientId: string,
-  message: ClientMessage
-): void {
-  const clientProcess = clientProcesses.get(clientId);
-  if (!clientProcess) {
+function handleMessageSend(clientId: string, message: ClientMessage): void {
+  const clientSession = clientSessions.get(clientId);
+  if (!clientSession) {
     sendToClient(clientId, {
       type: "error",
       message: "No active session. Start a session first.",
@@ -176,23 +289,33 @@ function handleMessageSend(
     return;
   }
 
-  const jsonMessage = JSON.stringify({
-    type: "user",
-    content: message.content,
-  });
-
-  const success = sendToProcess(clientProcess.processId, jsonMessage);
-  if (!success) {
-    sendToClient(clientId, {
-      type: "error",
-      message: "Failed to send message to process",
+  if (clientSession.mode === "terminal" && clientSession.ptyId) {
+    const success = writeToPty(clientSession.ptyId, message.content);
+    if (!success) {
+      sendToClient(clientId, {
+        type: "error",
+        message: "Failed to send message to terminal",
+      });
+    }
+  } else if (clientSession.processId) {
+    const jsonMessage = JSON.stringify({
+      type: "user",
+      content: message.content,
     });
+
+    const success = sendToProcess(clientSession.processId, jsonMessage);
+    if (!success) {
+      sendToClient(clientId, {
+        type: "error",
+        message: "Failed to send message to process",
+      });
+    }
   }
 }
 
 function handleSessionInterrupt(clientId: string): void {
-  const clientProcess = clientProcesses.get(clientId);
-  if (!clientProcess) {
+  const clientSession = clientSessions.get(clientId);
+  if (!clientSession) {
     sendToClient(clientId, {
       type: "error",
       message: "No active session to interrupt",
@@ -200,22 +323,31 @@ function handleSessionInterrupt(clientId: string): void {
     return;
   }
 
-  interruptProcess(clientProcess.processId);
+  if (clientSession.mode === "terminal" && clientSession.ptyId) {
+    writeToPty(clientSession.ptyId, "\x03");
+  } else if (clientSession.processId) {
+    interruptProcess(clientSession.processId);
+  }
 }
 
 function handleSessionClose(clientId: string): void {
-  const clientProcess = clientProcesses.get(clientId);
-  if (!clientProcess) {
+  const clientSession = clientSessions.get(clientId);
+  if (!clientSession) {
     return;
   }
 
-  killProcess(clientProcess.processId);
+  if (clientSession.processId) {
+    killProcess(clientSession.processId);
+  }
+  if (clientSession.ptyId) {
+    killPty(clientSession.ptyId);
+  }
 
-  if (clientProcess.sessionId) {
+  if (clientSession.sessionId) {
     dissociateClientFromSession(clientId);
   }
 
-  cleanupClientProcess(clientId);
+  cleanupClientSession(clientId);
 
   sendToClient(clientId, {
     type: "session.ended",
@@ -223,19 +355,109 @@ function handleSessionClose(clientId: string): void {
   });
 }
 
-export function cleanupSessionHandler(): void {
-  if (outputHandlerRegistered) {
-    offProcessOutput(handleProcessOutput);
-    outputHandlerRegistered = false;
+function handleModeSwitch(clientId: string, message: ClientMessage): void {
+  const clientSession = clientSessions.get(clientId);
+  if (!clientSession) {
+    sendToClient(clientId, {
+      type: "error",
+      message: "No active session. Start a session first.",
+    });
+    return;
   }
-  clientProcesses.clear();
+
+  const newMode = message.mode;
+  if (!newMode || newMode === clientSession.mode) {
+    return;
+  }
+
+  const sessionId = clientSession.sessionId;
+  const projectPath = clientSession.processId
+    ? undefined
+    : clientSession.ptyId
+      ? undefined
+      : undefined;
+
+  if (clientSession.processId) {
+    killProcess(clientSession.processId);
+    processClients.delete(clientSession.processId);
+  }
+  if (clientSession.ptyId) {
+    killPty(clientSession.ptyId);
+    ptyClients.delete(clientSession.ptyId);
+  }
+
+  clientSessions.delete(clientId);
+
+  handleSessionStart(clientId, {
+    type: "session.start",
+    sessionId,
+    projectPath,
+    mode: newMode,
+    cols: message.cols,
+    rows: message.rows,
+  });
+}
+
+function handleTerminalInput(clientId: string, message: ClientMessage): void {
+  const clientSession = clientSessions.get(clientId);
+  if (!clientSession || clientSession.mode !== "terminal") {
+    sendToClient(clientId, {
+      type: "error",
+      message: "No active terminal session",
+    });
+    return;
+  }
+
+  if (!message.content) {
+    return;
+  }
+
+  if (clientSession.ptyId) {
+    writeToPty(clientSession.ptyId, message.content);
+  }
+}
+
+function handleTerminalResize(clientId: string, message: ClientMessage): void {
+  const clientSession = clientSessions.get(clientId);
+  if (!clientSession || clientSession.mode !== "terminal") {
+    return;
+  }
+
+  if (clientSession.ptyId && message.cols && message.rows) {
+    resizePty(clientSession.ptyId, message.cols, message.rows);
+  }
+}
+
+export function cleanupSessionHandler(): void {
+  if (processOutputHandlerRegistered) {
+    offProcessOutput(handleProcessOutput);
+    processOutputHandlerRegistered = false;
+  }
+  if (ptyOutputHandlerRegistered) {
+    offPtyOutput(handlePtyOutput);
+    ptyOutputHandlerRegistered = false;
+  }
+  clientSessions.clear();
   processClients.clear();
+  ptyClients.clear();
 }
 
 export function getClientProcessId(clientId: string): string | undefined {
-  return clientProcesses.get(clientId)?.processId;
+  return clientSessions.get(clientId)?.processId;
+}
+
+export function getClientPtyId(clientId: string): string | undefined {
+  return clientSessions.get(clientId)?.ptyId;
 }
 
 export function getProcessClientId(processId: string): string | undefined {
   return processClients.get(processId);
+}
+
+export function getPtyClientId(ptyId: string): string | undefined {
+  return ptyClients.get(ptyId);
+}
+
+export function getClientMode(clientId: string): SessionMode | undefined {
+  return clientSessions.get(clientId)?.mode;
 }

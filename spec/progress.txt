@@ -396,3 +396,70 @@
 - `vitest.config.ts` - Added web/**/*.test.ts to jsdom environment
 - `spec/PRD.md` - Marked Phase 3 complete
 
+---
+
+## 2026-01-16: Phase 4 - Terminal Mode
+
+### Completed
+- Added node-pty and @xterm/xterm dependencies:
+  - `node-pty` for spawning pseudo-terminal processes
+  - `@xterm/xterm` for terminal emulation in the browser
+  - `@xterm/addon-fit` for auto-fitting terminal to container
+  - `@xterm/addon-web-links` for clickable links in terminal output
+- Created `api/pty-manager.ts` with:
+  - `spawnClaudePty()` - Spawns Claude CLI in a PTY with terminal mode
+  - Support for `--resume <sessionId>` to continue existing sessions
+  - Configurable terminal dimensions (cols/rows)
+  - `writeToPty()` - Writes data to PTY stdin
+  - `resizePty()` - Resizes the PTY
+  - `killPty()` - Kills PTY and removes from tracking
+  - `killAllPtys()` - Cleanup for all active PTYs
+  - Event-based output handling via `onPtyOutput()`/`offPtyOutput()`
+  - Max concurrent PTYs limit (10)
+- Updated `api/session-handler.ts` to support dual-mode sessions:
+  - Refactored to use `ClientSession` with mode field ("chat" | "terminal")
+  - Added `handleTerminalInput()` for terminal data input
+  - Added `handleTerminalResize()` for terminal resize events
+  - Updated `handleModeSwitch()` to switch between chat and terminal modes
+  - Interrupt in terminal mode sends Ctrl+C (\\x03)
+  - PTY output forwarded as `terminal.output` messages
+- Updated `api/websocket.ts` message types:
+  - Added `terminal.input` and `terminal.resize` client message types
+  - Added `cols` and `rows` fields for terminal dimensions
+- Created `web/components/terminal-view.tsx` with:
+  - `TerminalView` component wrapping xterm.js
+  - Custom dark theme matching app design
+  - Auto-fit on resize using ResizeObserver
+  - Input/resize callback props for WebSocket integration
+  - `useTerminalWriter()` hook for writing to terminal from parent
+- Updated `web/hooks/use-websocket.ts`:
+  - Extended `startSession()` with mode, cols, rows parameters
+  - Added `sendTerminalInput()` for terminal data input
+  - Added `resizeTerminal()` for terminal resize messages
+  - Updated `switchMode()` to include dimensions
+- Updated `web/components/session-view.tsx`:
+  - Added `ModeToggle` component for switching between Chat and Terminal modes
+  - Integrated `TerminalView` component
+  - Terminal output from WebSocket written to terminal
+  - Terminal input/resize events sent via WebSocket
+  - View mode persisted during session
+- Added 23 new tests (177 total) covering:
+  - PTY spawning with default and custom options
+  - PTY write, resize, kill operations
+  - PTY output event emission
+  - Max concurrent PTYs limit
+  - useTerminalWriter hook operations
+
+### Files Changed
+- `package.json` - Added node-pty, @xterm/xterm, @xterm/addon-fit, @xterm/addon-web-links
+- `api/pty-manager.ts` - New file: PTY process management
+- `api/pty-manager.test.ts` - New file: PTY manager tests
+- `api/session-handler.ts` - Updated for dual-mode sessions
+- `api/websocket.ts` - Added terminal message types
+- `web/components/terminal-view.tsx` - New file: xterm.js terminal component
+- `web/components/terminal-view.test.tsx` - New file: Terminal hook tests
+- `web/components/session-view.tsx` - Added mode toggle and terminal view
+- `web/components/session-view.test.tsx` - Updated for new useWebSocket return values
+- `web/hooks/use-websocket.ts` - Added terminal-related methods
+- `spec/PRD.md` - Marked Phase 4 complete
+
