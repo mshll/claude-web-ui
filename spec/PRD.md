@@ -155,18 +155,20 @@ Browser                    Backend                     Claude CLI
 
 ## Tasks
 
-### Phase 1: WebSocket Infrastructure
-- [x] Add ws dependency, create WebSocket server
-- [x] Implement connection management (multiple clients)
-- [x] Add process-manager for spawning Claude CLI
-- [x] Test basic message round-trip
+### Phase 1: WebSocket Infrastructure (Complete)
+- [x] WebSocket server with connection management and process spawning
 
-### Phase 2: Chat Mode Integration
-- [x] Create chat-input component
-- [x] Implement use-websocket hook
-- [x] Integrate with session-view
-- [x] Handle message streaming and rendering
-- [x] Add connection status indicator
+### Phase 2: Chat Mode Integration (Complete)
+- [x] Chat input, websocket hook, message streaming, and connection status
+
+### Phase 3: Session Management (Complete)
+- [x] Session lifecycle: new session creation modal, resume from viewer, active indicators in session list, graceful shutdown
+
+### Phase 4: Terminal Mode
+- [ ] Terminal view: add node-pty + xterm.js, create terminal-view component with PTY bridge, add mode toggle UI
+
+### Phase 5: Polish
+- [ ] Robustness: error handling, reconnection logic, multi-tab support
 
 
 ## Verification Plan

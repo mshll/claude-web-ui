@@ -4,7 +4,9 @@ import { PanelLeft, Copy, Check } from "lucide-react";
 import { formatTime } from "./utils";
 import { ProjectSidebar } from "./components/project-sidebar";
 import SessionView from "./components/session-view";
+import { NewSessionModal } from "./components/new-session-modal";
 import { useEventSource } from "./hooks/use-event-source";
+import { useActiveSessions } from "./hooks/use-active-sessions";
 
 interface SessionHeaderProps {
   session: Session;
@@ -58,6 +60,11 @@ function App() {
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(
     () => new Set()
   );
+  const [showNewSessionModal, setShowNewSessionModal] = useState(false);
+  const [newSessionProjectPath, setNewSessionProjectPath] = useState<
+    string | null
+  >(null);
+  const activeSessions = useActiveSessions();
 
   const handleCopyResumeCommand = useCallback(
     (sessionId: string, projectPath: string) => {
@@ -123,6 +130,16 @@ function App() {
 
   const handleSelectSession = useCallback((sessionId: string) => {
     setSelectedSession(sessionId);
+    setNewSessionProjectPath(null);
+  }, []);
+
+  const handleNewSession = useCallback(() => {
+    setShowNewSessionModal(true);
+  }, []);
+
+  const handleCreateSession = useCallback((projectPath: string) => {
+    setSelectedSession(null);
+    setNewSessionProjectPath(projectPath);
   }, []);
 
   return (
@@ -136,6 +153,8 @@ function App() {
             expandedProjects={expandedProjects}
             onToggleProject={handleToggleProject}
             loading={loading}
+            activeSessions={activeSessions}
+            onNewSession={handleNewSession}
           />
         </aside>
       )}
@@ -165,6 +184,8 @@ function App() {
               sessionId={selectedSession}
               projectPath={selectedSessionData?.project}
             />
+          ) : newSessionProjectPath ? (
+            <SessionView projectPath={newSessionProjectPath} />
           ) : (
             <div className="flex h-full items-center justify-center text-zinc-600">
               <div className="text-center">
@@ -179,6 +200,11 @@ function App() {
           )}
         </div>
       </main>
+      <NewSessionModal
+        isOpen={showNewSessionModal}
+        onClose={() => setShowNewSessionModal(false)}
+        onCreateSession={handleCreateSession}
+      />
     </div>
   );
 }

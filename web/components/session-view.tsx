@@ -13,7 +13,7 @@ const MAX_RETRY_DELAY_MS = 30000;
 const SCROLL_THRESHOLD_PX = 100;
 
 interface SessionViewProps {
-  sessionId: string;
+  sessionId?: string;
   projectPath?: string;
 }
 
@@ -67,7 +67,8 @@ function SessionView(props: SessionViewProps) {
   });
 
   const connect = useCallback(() => {
-    if (!mountedRef.current) {
+    if (!mountedRef.current || !sessionId) {
+      setLoading(false);
       return;
     }
 

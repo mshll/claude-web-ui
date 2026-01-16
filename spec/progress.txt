@@ -351,3 +351,48 @@
 - `web/components/session-view.tsx` - Integrated ConnectionStatusIndicator in header
 - `spec/PRD.md` - Marked task complete
 
+---
+
+## 2026-01-16: Phase 3 - Session Management
+
+### Completed
+- Added `/api/sessions/active` endpoint to return list of currently active sessions
+- Verified graceful shutdown already exists (SIGINT/SIGTERM handlers call `killAllProcesses()`)
+- Created `useActiveSessions` hook with:
+  - Polling mechanism for active sessions (default 5s interval)
+  - Returns Set of active session IDs
+  - Proper cleanup on unmount
+- Created `NewSessionModal` component with:
+  - Project dropdown fetched from `/api/projects` endpoint
+  - Loading state while fetching projects
+  - Shows project path below dropdown
+  - Start Session and Cancel buttons
+  - Modal closes on backdrop click or Escape key
+- Updated `ProjectSidebar` with:
+  - Active session indicator (pulsing green dot) next to active sessions
+  - New Session button (+) in header
+  - Accepts `activeSessions` and `onNewSession` props
+- Updated `SessionView` to:
+  - Accept optional `sessionId` (for new sessions without existing history)
+  - Skip EventSource connection when no sessionId
+- Updated `App` to:
+  - Use `useActiveSessions` hook
+  - Pass active sessions to `ProjectSidebar`
+  - Handle new session modal open/close
+  - Support creating new sessions by project path
+- Added 15 new tests (154 total) covering:
+  - `useActiveSessions` hook: initial state, fetch on mount, polling, error handling, cleanup
+  - `NewSessionModal`: rendering, fetching projects, loading state, project selection, submit, close
+
+### Files Changed
+- `api/server.ts` - Added `/api/sessions/active` endpoint
+- `web/hooks/use-active-sessions.ts` - New file: Hook to poll for active sessions
+- `web/hooks/use-active-sessions.test.ts` - New file: Hook tests
+- `web/components/new-session-modal.tsx` - New file: Modal for creating new sessions
+- `web/components/new-session-modal.test.tsx` - New file: Modal tests
+- `web/components/project-sidebar.tsx` - Added active indicators and new session button
+- `web/components/session-view.tsx` - Made sessionId optional for new sessions
+- `web/app.tsx` - Integrated active sessions and new session modal
+- `vitest.config.ts` - Added web/**/*.test.ts to jsdom environment
+- `spec/PRD.md` - Marked Phase 3 complete
+

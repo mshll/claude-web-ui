@@ -1,5 +1,5 @@
 import { useState, useMemo, memo } from "react";
-import { ChevronRight, ChevronDown } from "lucide-react";
+import { ChevronRight, ChevronDown, Plus } from "lucide-react";
 import type { Session } from "@claude-run/api";
 import { formatTime } from "../utils";
 
@@ -10,6 +10,8 @@ interface ProjectSidebarProps {
   expandedProjects: Set<string>;
   onToggleProject: (project: string) => void;
   loading?: boolean;
+  activeSessions?: Set<string>;
+  onNewSession?: () => void;
 }
 
 interface ProjectGroup {
@@ -52,6 +54,8 @@ const ProjectSidebar = memo(function ProjectSidebar(props: ProjectSidebarProps) 
     expandedProjects,
     onToggleProject,
     loading,
+    activeSessions = new Set(),
+    onNewSession,
   } = props;
   const [search, setSearch] = useState("");
 
@@ -75,7 +79,7 @@ const ProjectSidebar = memo(function ProjectSidebar(props: ProjectSidebarProps) 
   return (
     <div className="h-full overflow-hidden bg-zinc-950 flex flex-col">
       <div className="h-10 px-3 flex items-center border-b border-zinc-800/60">
-        <div className="flex items-center gap-2 text-zinc-500 w-full">
+        <div className="flex items-center gap-2 text-zinc-500 flex-1">
           <svg
             className="w-4 h-4 flex-shrink-0"
             fill="none"
@@ -117,6 +121,15 @@ const ProjectSidebar = memo(function ProjectSidebar(props: ProjectSidebarProps) 
             </button>
           )}
         </div>
+        {onNewSession && (
+          <button
+            onClick={onNewSession}
+            className="p-1.5 hover:bg-zinc-800 rounded transition-colors ml-2"
+            title="New session"
+          >
+            <Plus className="w-4 h-4 text-zinc-400" />
+          </button>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto">
@@ -170,26 +183,37 @@ const ProjectSidebar = memo(function ProjectSidebar(props: ProjectSidebarProps) 
                   </button>
                   {isExpanded && (
                     <div>
-                      {group.sessions.map((session) => (
-                        <button
-                          key={session.id}
-                          onClick={() => onSelectSession(session.id)}
-                          className={`w-full pl-8 pr-3 py-2.5 text-left overflow-hidden border-b border-zinc-800/40 ${
-                            selectedSession === session.id
-                              ? "bg-cyan-700/30"
-                              : "hover:bg-zinc-900/60"
-                          }`}
-                        >
-                          <div className="flex items-center justify-between mb-0.5">
-                            <span className="text-[10px] text-zinc-600">
-                              {formatTime(session.timestamp)}
-                            </span>
-                          </div>
-                          <p className="text-[12px] text-zinc-300 leading-snug line-clamp-2 break-words">
-                            {session.display}
-                          </p>
-                        </button>
-                      ))}
+                      {group.sessions.map((session) => {
+                        const isActive = activeSessions.has(session.id);
+                        return (
+                          <button
+                            key={session.id}
+                            onClick={() => onSelectSession(session.id)}
+                            className={`w-full pl-8 pr-3 py-2.5 text-left overflow-hidden border-b border-zinc-800/40 ${
+                              selectedSession === session.id
+                                ? "bg-cyan-700/30"
+                                : "hover:bg-zinc-900/60"
+                            }`}
+                          >
+                            <div className="flex items-center justify-between mb-0.5">
+                              <div className="flex items-center gap-1.5">
+                                {isActive && (
+                                  <span
+                                    className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"
+                                    title="Active session"
+                                  />
+                                )}
+                                <span className="text-[10px] text-zinc-600">
+                                  {formatTime(session.timestamp)}
+                                </span>
+                              </div>
+                            </div>
+                            <p className="text-[12px] text-zinc-300 leading-snug line-clamp-2 break-words">
+                              {session.display}
+                            </p>
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
                 </div>

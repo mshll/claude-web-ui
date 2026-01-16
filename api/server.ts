@@ -24,7 +24,7 @@ import {
   onSessionChange,
   offSessionChange,
 } from "./watcher";
-import { initWebSocket, stopWebSocket, setMessageHandler } from "./websocket";
+import { initWebSocket, stopWebSocket, setMessageHandler, getActiveSessions } from "./websocket";
 import { handleSessionMessage, cleanupSessionHandler } from "./session-handler";
 import { killAllProcesses } from "./process-manager";
 import { join, dirname } from "path";
@@ -77,6 +77,11 @@ export function createServer(options: ServerOptions) {
   app.get("/api/projects", async (c) => {
     const projects = await getProjects();
     return c.json(projects);
+  });
+
+  app.get("/api/sessions/active", (c) => {
+    const activeSessions = getActiveSessions();
+    return c.json(activeSessions);
   });
 
   app.get("/api/sessions/stream", async (c) => {
