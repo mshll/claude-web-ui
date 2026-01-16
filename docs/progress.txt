@@ -192,3 +192,51 @@
 - `package.json` - Added testing-library and jsdom dependencies
 - `vitest.config.ts` - Added React plugin and jsdom environment support
 - `docs/PRD.md` - Marked task complete
+
+---
+
+## 2026-01-16: Phase 2 Task 2 - Implement use-websocket hook
+
+### Completed
+- Created `web/hooks/use-websocket.ts` with:
+  - `useWebSocket(url, options)` hook for managing WebSocket connections
+  - Connection state management (disconnected, connecting, connected)
+  - Automatic reconnection with exponential backoff (configurable maxRetries and baseDelay)
+  - Client ID and active session ID tracking
+  - Message type handlers: onMessage, onSessionStarted, onAssistantChunk, onTerminalOutput, onSessionEnded, onError
+  - Convenience methods: startSession(), sendMessage(), interrupt(), closeSession(), switchMode()
+  - Generic send() method for custom messages
+  - Proper cleanup on unmount
+  - Type exports for ClientMessage, ServerMessage, ConnectionStatus
+- Updated vitest configuration to include .ts test files
+- Added 24 tests (96 total) covering:
+  - Initial connecting status
+  - Transition to connected on WebSocket open
+  - Transition to disconnected on WebSocket close
+  - Client ID from connected message
+  - Client ID cleared on disconnect
+  - Exponential backoff reconnection
+  - Max retries limit and error callback
+  - Retry count reset on successful connection
+  - Cleanup on unmount
+  - onMessage callback for all messages
+  - onSessionStarted callback and activeSessionId state
+  - onAssistantChunk callback
+  - onTerminalOutput callback
+  - onSessionEnded callback and activeSessionId clearing
+  - onError callback
+  - Invalid JSON handling
+  - send() returns false when disconnected
+  - send() sends message when connected
+  - startSession() with sessionId and projectPath
+  - startSession() without parameters
+  - sendMessage() sends content
+  - interrupt() sends interrupt message
+  - closeSession() sends close message
+  - switchMode() sends mode switch message
+
+### Files Changed
+- `web/hooks/use-websocket.ts` - New file: WebSocket connection hook
+- `web/hooks/use-websocket.test.ts` - New file: Hook tests with mocked WebSocket
+- `vitest.config.ts` - Added web/**/*.test.ts to include pattern
+- `docs/PRD.md` - Marked task complete
