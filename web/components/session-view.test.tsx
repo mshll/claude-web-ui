@@ -63,6 +63,8 @@ describe("SessionView", () => {
       status: "connected",
       clientId: "client-1",
       activeSessionId: null,
+      hasControl: true,
+      retryCount: 0,
       send: vi.fn().mockReturnValue(true),
       startSession: vi.fn().mockReturnValue(true),
       sendMessage: vi.fn().mockReturnValue(true),
@@ -71,6 +73,7 @@ describe("SessionView", () => {
       switchMode: vi.fn().mockReturnValue(true),
       sendTerminalInput: vi.fn().mockReturnValue(true),
       resizeTerminal: vi.fn().mockReturnValue(true),
+      reconnect: vi.fn(),
     });
 
     mockUseMessageStream.mockReturnValue({
@@ -124,6 +127,8 @@ describe("SessionView", () => {
       status: "disconnected",
       clientId: null,
       activeSessionId: null,
+      hasControl: false,
+      retryCount: 0,
       send: vi.fn().mockReturnValue(false),
       startSession: vi.fn().mockReturnValue(false),
       sendMessage: vi.fn().mockReturnValue(false),
@@ -132,6 +137,7 @@ describe("SessionView", () => {
       switchMode: vi.fn().mockReturnValue(false),
       sendTerminalInput: vi.fn().mockReturnValue(false),
       resizeTerminal: vi.fn().mockReturnValue(false),
+      reconnect: vi.fn(),
     });
 
     render(<SessionView sessionId="test-session" />);
@@ -149,6 +155,8 @@ describe("SessionView", () => {
       status: "disconnected",
       clientId: null,
       activeSessionId: null,
+      hasControl: false,
+      retryCount: 0,
       send: vi.fn().mockReturnValue(false),
       startSession: vi.fn().mockReturnValue(false),
       sendMessage: vi.fn().mockReturnValue(false),
@@ -157,6 +165,7 @@ describe("SessionView", () => {
       switchMode: vi.fn().mockReturnValue(false),
       sendTerminalInput: vi.fn().mockReturnValue(false),
       resizeTerminal: vi.fn().mockReturnValue(false),
+      reconnect: vi.fn(),
     });
 
     render(<SessionView sessionId="test-session" />);
@@ -179,6 +188,8 @@ describe("SessionView", () => {
       status: "connected",
       clientId: "client-1",
       activeSessionId: null,
+      hasControl: true,
+      retryCount: 0,
       send: vi.fn().mockReturnValue(true),
       startSession: mockStartSession,
       sendMessage: mockSendMessage,
@@ -187,6 +198,7 @@ describe("SessionView", () => {
       switchMode: vi.fn().mockReturnValue(true),
       sendTerminalInput: vi.fn().mockReturnValue(true),
       resizeTerminal: vi.fn().mockReturnValue(true),
+      reconnect: vi.fn(),
     });
 
     mockUseMessageStream.mockReturnValue({
@@ -225,6 +237,8 @@ describe("SessionView", () => {
       status: "connected",
       clientId: "client-1",
       activeSessionId: "test-session",
+      hasControl: true,
+      retryCount: 0,
       send: vi.fn().mockReturnValue(true),
       startSession: mockStartSession,
       sendMessage: mockSendMessage,
@@ -233,6 +247,7 @@ describe("SessionView", () => {
       switchMode: vi.fn().mockReturnValue(true),
       sendTerminalInput: vi.fn().mockReturnValue(true),
       resizeTerminal: vi.fn().mockReturnValue(true),
+      reconnect: vi.fn(),
     });
 
     render(<SessionView sessionId="test-session" projectPath="/test/project" />);
@@ -262,6 +277,8 @@ describe("SessionView", () => {
       status: "connected",
       clientId: "client-1",
       activeSessionId: "test-session",
+      hasControl: true,
+      retryCount: 0,
       send: vi.fn().mockReturnValue(true),
       startSession: vi.fn().mockReturnValue(true),
       sendMessage: mockSendMessage,
@@ -270,6 +287,7 @@ describe("SessionView", () => {
       switchMode: vi.fn().mockReturnValue(true),
       sendTerminalInput: vi.fn().mockReturnValue(true),
       resizeTerminal: vi.fn().mockReturnValue(true),
+      reconnect: vi.fn(),
     });
 
     mockUseMessageStream.mockReturnValue({

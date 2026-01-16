@@ -15,8 +15,8 @@ class MockWebSocket {
   url: string;
   readyState: number = MockWebSocket.CONNECTING;
   onopen: (() => void) | null = null;
-  onclose: (() => void) | null = null;
-  onerror: (() => void) | null = null;
+  onclose: ((event: { wasClean: boolean; code: number }) => void) | null = null;
+  onerror: ((event: Event) => void) | null = null;
   onmessage: ((event: { data: string }) => void) | null = null;
 
   private closed = false;
@@ -32,7 +32,7 @@ class MockWebSocket {
     if (this.closed) return;
     this.closed = true;
     this.readyState = MockWebSocket.CLOSED;
-    this.onclose?.();
+    this.onclose?.({ wasClean: true, code: 1000 });
   }
 
   simulateOpen() {
@@ -45,11 +45,18 @@ class MockWebSocket {
   }
 
   simulateError() {
-    this.onerror?.();
+    this.onerror?.(new Event("error"));
   }
 
-  simulateClose() {
-    this.close();
+  simulateClose(wasClean = true) {
+    if (this.closed) return;
+    this.closed = true;
+    this.readyState = MockWebSocket.CLOSED;
+    this.onclose?.({ wasClean, code: wasClean ? 1000 : 1006 });
+  }
+
+  simulateUncleanClose() {
+    this.simulateClose(false);
   }
 }
 
@@ -134,7 +141,7 @@ describe("useWebSocket", () => {
       expect(result.current.clientId).toBeNull();
     });
 
-    it("attempts reconnection with exponential backoff", async () => {
+    it("attempts reconnection with exponential backoff on unclean close", async () => {
       const { result } = renderHook(() =>
         useWebSocket("ws://localhost:12001/ws", { baseDelay: 1000 })
       );
@@ -144,26 +151,46 @@ describe("useWebSocket", () => {
       });
 
       act(() => {
-        getLatestWebSocket().simulateClose();
+        getLatestWebSocket().simulateUncleanClose();
       });
 
       expect(MockWebSocket.instances).toHaveLength(1);
 
       act(() => {
-        vi.advanceTimersByTime(1000);
+        vi.advanceTimersByTime(1500);
       });
 
       expect(MockWebSocket.instances).toHaveLength(2);
 
       act(() => {
-        getLatestWebSocket().simulateClose();
+        getLatestWebSocket().simulateUncleanClose();
       });
 
       act(() => {
-        vi.advanceTimersByTime(2000);
+        vi.advanceTimersByTime(3000);
       });
 
       expect(MockWebSocket.instances).toHaveLength(3);
+    });
+
+    it("does not reconnect on clean close", async () => {
+      renderHook(() =>
+        useWebSocket("ws://localhost:12001/ws", { baseDelay: 100 })
+      );
+
+      act(() => {
+        getLatestWebSocket().simulateOpen();
+      });
+
+      act(() => {
+        getLatestWebSocket().simulateClose(true);
+      });
+
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+
+      expect(MockWebSocket.instances).toHaveLength(1);
     });
 
     it("stops reconnecting after max retries", async () => {
@@ -177,15 +204,7 @@ describe("useWebSocket", () => {
       );
 
       act(() => {
-        getLatestWebSocket().simulateClose();
-      });
-
-      act(() => {
-        vi.advanceTimersByTime(100);
-      });
-
-      act(() => {
-        getLatestWebSocket().simulateClose();
+        getLatestWebSocket().simulateUncleanClose();
       });
 
       act(() => {
@@ -193,7 +212,15 @@ describe("useWebSocket", () => {
       });
 
       act(() => {
-        getLatestWebSocket().simulateClose();
+        getLatestWebSocket().simulateUncleanClose();
+      });
+
+      act(() => {
+        vi.advanceTimersByTime(400);
+      });
+
+      act(() => {
+        getLatestWebSocket().simulateUncleanClose();
       });
 
       expect(onError).toHaveBeenCalledWith("Connection failed after max retries");
@@ -205,11 +232,11 @@ describe("useWebSocket", () => {
       );
 
       act(() => {
-        getLatestWebSocket().simulateClose();
+        getLatestWebSocket().simulateUncleanClose();
       });
 
       act(() => {
-        vi.advanceTimersByTime(100);
+        vi.advanceTimersByTime(200);
       });
 
       act(() => {
@@ -217,14 +244,95 @@ describe("useWebSocket", () => {
       });
 
       act(() => {
-        getLatestWebSocket().simulateClose();
+        getLatestWebSocket().simulateUncleanClose();
       });
 
       act(() => {
-        vi.advanceTimersByTime(100);
+        vi.advanceTimersByTime(200);
       });
 
       expect(MockWebSocket.instances).toHaveLength(3);
+    });
+
+    it("calls onReconnecting callback with retry count", async () => {
+      const onReconnecting = vi.fn();
+      renderHook(() =>
+        useWebSocket("ws://localhost:12001/ws", {
+          baseDelay: 100,
+          maxRetries: 5,
+          onReconnecting,
+        })
+      );
+
+      act(() => {
+        getLatestWebSocket().simulateUncleanClose();
+      });
+
+      act(() => {
+        vi.advanceTimersByTime(200);
+      });
+
+      expect(onReconnecting).toHaveBeenCalledWith(1, 5);
+
+      act(() => {
+        getLatestWebSocket().simulateUncleanClose();
+      });
+
+      act(() => {
+        vi.advanceTimersByTime(400);
+      });
+
+      expect(onReconnecting).toHaveBeenCalledWith(2, 5);
+    });
+
+    it("exposes retryCount state", async () => {
+      const { result } = renderHook(() =>
+        useWebSocket("ws://localhost:12001/ws", { baseDelay: 100 })
+      );
+
+      expect(result.current.retryCount).toBe(0);
+
+      act(() => {
+        getLatestWebSocket().simulateUncleanClose();
+      });
+
+      act(() => {
+        vi.advanceTimersByTime(200);
+      });
+
+      expect(result.current.retryCount).toBe(1);
+    });
+
+    it("reconnect() resets retry count and reconnects", async () => {
+      const { result } = renderHook(() =>
+        useWebSocket("ws://localhost:12001/ws", { baseDelay: 100, maxRetries: 2 })
+      );
+
+      act(() => {
+        getLatestWebSocket().simulateUncleanClose();
+      });
+
+      act(() => {
+        vi.advanceTimersByTime(200);
+      });
+
+      act(() => {
+        getLatestWebSocket().simulateUncleanClose();
+      });
+
+      act(() => {
+        vi.advanceTimersByTime(400);
+      });
+
+      expect(result.current.retryCount).toBe(2);
+      const instanceCountBefore = MockWebSocket.instances.length;
+
+      act(() => {
+        result.current.reconnect();
+      });
+
+      expect(result.current.retryCount).toBe(0);
+      expect(MockWebSocket.instances.length).toBe(instanceCountBefore + 1);
     });
 
     it("cleans up on unmount", async () => {
@@ -354,10 +462,10 @@ describe("useWebSocket", () => {
       expect(onError).toHaveBeenCalledWith("Something went wrong");
     });
 
-    it("ignores invalid JSON messages", async () => {
-      const onMessage = vi.fn();
+    it("calls onError for invalid JSON messages", async () => {
+      const onError = vi.fn();
       renderHook(() =>
-        useWebSocket("ws://localhost:12001/ws", { onMessage })
+        useWebSocket("ws://localhost:12001/ws", { onError })
       );
 
       act(() => {
@@ -365,7 +473,64 @@ describe("useWebSocket", () => {
         getLatestWebSocket().onmessage?.({ data: "not json" });
       });
 
-      expect(onMessage).not.toHaveBeenCalled();
+      expect(onError).toHaveBeenCalledWith("Invalid message from server");
+    });
+
+    it("handles pong messages and updates lastPong", async () => {
+      const onMessage = vi.fn();
+      renderHook(() =>
+        useWebSocket("ws://localhost:12001/ws", { onMessage })
+      );
+
+      act(() => {
+        getLatestWebSocket().simulateOpen();
+        getLatestWebSocket().simulateMessage({ type: "pong" });
+      });
+
+      expect(onMessage).toHaveBeenCalledWith({ type: "pong" });
+    });
+
+    it("handles session.control messages", async () => {
+      const onSessionControl = vi.fn();
+      const { result } = renderHook(() =>
+        useWebSocket("ws://localhost:12001/ws", { onSessionControl })
+      );
+
+      act(() => {
+        getLatestWebSocket().simulateOpen();
+        getLatestWebSocket().simulateMessage({
+          type: "session.control",
+          hasControl: true,
+        });
+      });
+
+      expect(onSessionControl).toHaveBeenCalledWith(true);
+      expect(result.current.hasControl).toBe(true);
+    });
+
+    it("clears hasControl when session ends", async () => {
+      const { result } = renderHook(() =>
+        useWebSocket("ws://localhost:12001/ws")
+      );
+
+      act(() => {
+        getLatestWebSocket().simulateOpen();
+        getLatestWebSocket().simulateMessage({
+          type: "session.control",
+          hasControl: true,
+        });
+      });
+
+      expect(result.current.hasControl).toBe(true);
+
+      act(() => {
+        getLatestWebSocket().simulateMessage({
+          type: "session.ended",
+          reason: "Session closed",
+        });
+      });
+
+      expect(result.current.hasControl).toBe(false);
     });
   });
 
@@ -480,6 +645,75 @@ describe("useWebSocket", () => {
 
       expect(getLatestWebSocket().send).toHaveBeenCalledWith(
         JSON.stringify({ type: "mode.switch", mode: "terminal" })
+      );
+    });
+
+    it("queues messages when disconnected if queueIfDisconnected is true", async () => {
+      const { result } = renderHook(() => useWebSocket("ws://localhost:12001/ws"));
+
+      const sent = result.current.send({ type: "message.send", content: "queued" }, true);
+
+      expect(sent).toBe(true);
+      expect(getLatestWebSocket().send).not.toHaveBeenCalled();
+
+      act(() => {
+        getLatestWebSocket().simulateOpen();
+      });
+
+      expect(getLatestWebSocket().send).toHaveBeenCalledWith(
+        JSON.stringify({ type: "message.send", content: "queued" })
+      );
+    });
+
+    it("does not queue messages by default when disconnected", () => {
+      const { result } = renderHook(() => useWebSocket("ws://localhost:12001/ws"));
+
+      const sent = result.current.send({ type: "message.send", content: "test" });
+
+      expect(sent).toBe(false);
+    });
+  });
+
+  describe("heartbeat", () => {
+    it("sends ping messages at heartbeat interval", async () => {
+      renderHook(() =>
+        useWebSocket("ws://localhost:12001/ws", { heartbeatInterval: 1000 })
+      );
+
+      act(() => {
+        getLatestWebSocket().simulateOpen();
+      });
+
+      expect(getLatestWebSocket().send).not.toHaveBeenCalledWith(
+        JSON.stringify({ type: "ping" })
+      );
+
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+
+      expect(getLatestWebSocket().send).toHaveBeenCalledWith(
+        JSON.stringify({ type: "ping" })
+      );
+    });
+
+    it("clears heartbeat interval on unmount", async () => {
+      const { unmount } = renderHook(() =>
+        useWebSocket("ws://localhost:12001/ws", { heartbeatInterval: 1000 })
+      );
+
+      act(() => {
+        getLatestWebSocket().simulateOpen();
+      });
+
+      unmount();
+
+      act(() => {
+        vi.advanceTimersByTime(2000);
+      });
+
+      expect(getLatestWebSocket().send).not.toHaveBeenCalledWith(
+        JSON.stringify({ type: "ping" })
       );
     });
   });

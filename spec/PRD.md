@@ -167,8 +167,8 @@ Browser                    Backend                     Claude CLI
 ### Phase 4: Terminal Mode (Complete)
 - [x] Terminal view: add node-pty + xterm.js, create terminal-view component with PTY bridge, add mode toggle UI
 
-### Phase 5: Polish
-- [ ] Robustness: error handling, reconnection logic, multi-tab support
+### Phase 5: Polish (Complete)
+- [x] Robustness: error handling, reconnection logic, multi-tab support
 
 
 ## Verification Plan

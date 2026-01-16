@@ -463,3 +463,55 @@
 - `web/hooks/use-websocket.ts` - Added terminal-related methods
 - `spec/PRD.md` - Marked Phase 4 complete
 
+---
+
+## 2026-01-16: Phase 5 - Robustness (Error Handling, Reconnection, Multi-Tab Support)
+
+### Completed
+- Enhanced WebSocket hook (`use-websocket.ts`) with:
+  - Jitter added to exponential backoff (prevents thundering herd when multiple clients reconnect)
+  - Client-side heartbeat with ping/pong (detects stale connections)
+  - Message queue for messages sent during reconnection (flushes on reconnect, expires after 30s)
+  - `onReconnecting` callback with retry count
+  - `retryCount` state exposed to UI
+  - `reconnect()` method for manual reconnection
+  - `hasControl` state for session control tracking
+  - `onSessionControl` callback for control changes
+  - Error messages for invalid JSON from server (was silently ignored)
+  - Only reconnects on unclean close (clean close means intentional disconnect)
+- Enhanced WebSocket server (`api/websocket.ts`) with:
+  - `ping` message type responds with `pong`
+  - Session control tracking (first client to join gets control)
+  - `session.control` message notifies clients of control status
+  - Control transfer when controller disconnects
+  - `hasSessionControl()`, `getSessionController()`, `requestSessionControl()` functions
+- Updated session view (`session-view.tsx`) with:
+  - Dynamic placeholder showing reconnection status ("Reconnecting... (attempt N)")
+  - Placeholder when user doesn't have control ("Another tab controls this session")
+  - Input disabled when not connected or not in control
+- Added 17 new tests (194 total) covering:
+  - Reconnection with jitter on unclean close
+  - No reconnection on clean close
+  - `onReconnecting` callback
+  - `retryCount` state
+  - `reconnect()` method
+  - Pong message handling
+  - `session.control` message handling
+  - `hasControl` state
+  - Message queuing when disconnected
+  - Heartbeat sending
+  - Server ping/pong response
+  - Session control assignment to first client
+  - Session control denial to subsequent clients
+  - Control transfer on controller disconnect
+  - `requestSessionControl()` transfer
+
+### Files Changed
+- `api/websocket.ts` - Added ping/pong, session control tracking
+- `api/websocket.test.ts` - Added tests for ping/pong and session control
+- `web/hooks/use-websocket.ts` - Enhanced with heartbeat, queue, control tracking
+- `web/hooks/use-websocket.test.ts` - Added tests for new features
+- `web/components/session-view.tsx` - Added control awareness and reconnect status
+- `web/components/session-view.test.tsx` - Updated mocks for new return values
+- `spec/PRD.md` - Marked Phase 5 complete
+

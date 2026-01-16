@@ -15,6 +15,9 @@ import {
   getClientSession,
   sendToSession,
   getActiveSessions,
+  hasSessionControl,
+  getSessionController,
+  requestSessionControl,
   type ClientMessage,
 } from "./websocket";
 
@@ -409,6 +412,184 @@ describe("WebSocket Server", () => {
         data: "hello",
       });
       expect(sentCount).toBe(0);
+    });
+  });
+
+  describe("ping/pong", () => {
+    it("should respond to ping with pong", async () => {
+      const ws = new WebSocket(`ws://localhost:${port}/ws`);
+      await waitForOpen(ws);
+
+      const messages: unknown[] = [];
+      ws.on("message", (data) => messages.push(JSON.parse(data.toString())));
+
+      await new Promise((r) => setTimeout(r, 50));
+
+      ws.send(JSON.stringify({ type: "ping" }));
+      await new Promise((r) => setTimeout(r, 50));
+
+      const pongMsg = messages.find(
+        (m: unknown) => (m as { type: string }).type === "pong"
+      );
+      expect(pongMsg).toMatchObject({ type: "pong" });
+
+      ws.close();
+    });
+  });
+
+  describe("session control", () => {
+    it("should give control to first client associating with session", async () => {
+      const ws = new WebSocket(`ws://localhost:${port}/ws`);
+      await waitForOpen(ws);
+
+      const messages: unknown[] = [];
+      ws.on("message", (data) => messages.push(JSON.parse(data.toString())));
+
+      await new Promise((r) => setTimeout(r, 50));
+
+      const clientId = getConnectedClients()[0];
+      associateClientWithSession(clientId, "session-1");
+
+      await new Promise((r) => setTimeout(r, 50));
+
+      const controlMsg = messages.find(
+        (m: unknown) => (m as { type: string }).type === "session.control"
+      );
+      expect(controlMsg).toMatchObject({
+        type: "session.control",
+        hasControl: true,
+      });
+      expect(hasSessionControl(clientId, "session-1")).toBe(true);
+      expect(getSessionController("session-1")).toBe(clientId);
+
+      ws.close();
+    });
+
+    it("should not give control to subsequent clients", async () => {
+      const ws1 = new WebSocket(`ws://localhost:${port}/ws`);
+      const ws2 = new WebSocket(`ws://localhost:${port}/ws`);
+
+      const [msg1, msg2] = await Promise.all([
+        waitForMessage(ws1),
+        waitForMessage(ws2),
+      ]) as Array<{ type: string; clientId: string }>;
+
+      const clientId1 = msg1.clientId;
+      const clientId2 = msg2.clientId;
+
+      const messages2: unknown[] = [];
+      ws2.on("message", (data) => messages2.push(JSON.parse(data.toString())));
+
+      associateClientWithSession(clientId1, "session-1");
+
+      await new Promise((r) => setTimeout(r, 50));
+
+      associateClientWithSession(clientId2, "session-1");
+
+      await new Promise((r) => setTimeout(r, 50));
+
+      const controlMsg = messages2.find(
+        (m: unknown) => (m as { type: string }).type === "session.control"
+      );
+      expect(controlMsg).toMatchObject({
+        type: "session.control",
+        hasControl: false,
+      });
+      expect(hasSessionControl(clientId2, "session-1")).toBe(false);
+      expect(getSessionController("session-1")).toBe(clientId1);
+
+      ws1.close();
+      ws2.close();
+    });
+
+    it("should transfer control when controller disconnects", async () => {
+      const ws1 = new WebSocket(`ws://localhost:${port}/ws`);
+      const ws2 = new WebSocket(`ws://localhost:${port}/ws`);
+
+      const [msg1, msg2] = await Promise.all([
+        waitForMessage(ws1),
+        waitForMessage(ws2),
+      ]) as Array<{ type: string; clientId: string }>;
+
+      const clientId1 = msg1.clientId;
+      const clientId2 = msg2.clientId;
+
+      associateClientWithSession(clientId1, "session-1");
+      associateClientWithSession(clientId2, "session-1");
+
+      const messages2: unknown[] = [];
+      ws2.on("message", (data) => messages2.push(JSON.parse(data.toString())));
+
+      await new Promise((r) => setTimeout(r, 50));
+
+      ws1.close();
+
+      await new Promise((r) => setTimeout(r, 100));
+
+      const controlMsg = messages2.find(
+        (m: unknown) =>
+          (m as { type: string; hasControl?: boolean }).type === "session.control" &&
+          (m as { hasControl?: boolean }).hasControl === true
+      );
+      expect(controlMsg).toMatchObject({
+        type: "session.control",
+        hasControl: true,
+      });
+      expect(getSessionController("session-1")).toBe(clientId2);
+
+      ws2.close();
+    });
+
+    it("should allow requesting control transfer", async () => {
+      const ws1 = new WebSocket(`ws://localhost:${port}/ws`);
+      const ws2 = new WebSocket(`ws://localhost:${port}/ws`);
+
+      const [msg1, msg2] = await Promise.all([
+        waitForMessage(ws1),
+        waitForMessage(ws2),
+      ]) as Array<{ type: string; clientId: string }>;
+
+      const clientId1 = msg1.clientId;
+      const clientId2 = msg2.clientId;
+
+      associateClientWithSession(clientId1, "session-1");
+      associateClientWithSession(clientId2, "session-1");
+
+      const messages1: unknown[] = [];
+      const messages2: unknown[] = [];
+      ws1.on("message", (data) => messages1.push(JSON.parse(data.toString())));
+      ws2.on("message", (data) => messages2.push(JSON.parse(data.toString())));
+
+      await new Promise((r) => setTimeout(r, 50));
+
+      const result = requestSessionControl(clientId2, "session-1");
+
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(result).toBe(true);
+      expect(getSessionController("session-1")).toBe(clientId2);
+
+      const lostControl = messages1.find(
+        (m: unknown) =>
+          (m as { type: string; hasControl?: boolean }).type === "session.control" &&
+          (m as { hasControl?: boolean }).hasControl === false
+      );
+      const gainedControl = messages2.find(
+        (m: unknown) =>
+          (m as { type: string; hasControl?: boolean }).type === "session.control" &&
+          (m as { hasControl?: boolean }).hasControl === true
+      );
+
+      expect(lostControl).toBeDefined();
+      expect(gainedControl).toBeDefined();
+
+      ws1.close();
+      ws2.close();
+    });
+
+    it("should return false for requestSessionControl with non-existent client", () => {
+      const result = requestSessionControl("fake-client", "session-1");
+      expect(result).toBe(false);
     });
   });
 });

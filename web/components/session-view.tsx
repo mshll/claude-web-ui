@@ -102,12 +102,15 @@ function SessionView(props: SessionViewProps) {
   const {
     status: wsStatus,
     activeSessionId,
+    hasControl,
+    retryCount: wsRetryCount,
     startSession,
     sendMessage,
     interrupt,
     switchMode,
     sendTerminalInput,
     resizeTerminal,
+    reconnect,
   } = useWebSocket(getWebSocketUrl(), {
     onSessionStarted: () => {
       // Session started
@@ -123,6 +126,9 @@ function SessionView(props: SessionViewProps) {
     },
     onError: () => {
       // Error occurred
+    },
+    onReconnecting: () => {
+      // Reconnection attempt
     },
   });
 
@@ -305,6 +311,20 @@ function SessionView(props: SessionViewProps) {
   );
 
   const isConnected = wsStatus === "connected";
+  const canSendMessages = isConnected && (hasControl || !activeSessionId);
+
+  const getPlaceholder = () => {
+    if (!isConnected) {
+      if (wsRetryCount > 0) {
+        return `Reconnecting... (attempt ${wsRetryCount})`;
+      }
+      return "Connecting...";
+    }
+    if (activeSessionId && !hasControl) {
+      return "Another tab controls this session";
+    }
+    return "Send a message...";
+  };
 
   if (loading) {
     return (
@@ -373,9 +393,9 @@ function SessionView(props: SessionViewProps) {
           <ChatInput
             onSend={handleSendMessage}
             onInterrupt={handleInterrupt}
-            disabled={!isConnected}
+            disabled={!canSendMessages}
             isProcessing={isStreaming}
-            placeholder={isConnected ? "Send a message..." : "Connecting..."}
+            placeholder={getPlaceholder()}
           />
         </>
       ) : (

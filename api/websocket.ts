@@ -14,7 +14,8 @@ export interface ClientMessage {
     | "mode.switch"
     | "session.close"
     | "terminal.input"
-    | "terminal.resize";
+    | "terminal.resize"
+    | "ping";
   sessionId?: string;
   projectPath?: string;
   content?: string;
@@ -30,13 +31,16 @@ export interface ServerMessage {
     | "assistant.chunk"
     | "terminal.output"
     | "session.ended"
-    | "error";
+    | "error"
+    | "pong"
+    | "session.control";
   clientId?: string;
   sessionId?: string;
   content?: unknown;
   data?: string;
   reason?: string;
   message?: string;
+  hasControl?: boolean;
   [key: string]: unknown;
 }
 
@@ -54,6 +58,7 @@ export type MessageHandler = (
 
 const clients = new Map<string, ClientInfo>();
 const sessionClients = new Map<string, Set<string>>();
+const sessionControllers = new Map<string, string>();
 let wss: WebSocketServer | null = null;
 let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
 let messageHandler: MessageHandler | null = null;
@@ -82,6 +87,11 @@ function handleClientMessage(clientId: string, data: string): void {
     return;
   }
 
+  if (message.type === "ping") {
+    sendToClient(clientId, { type: "pong" });
+    return;
+  }
+
   if (messageHandler) {
     try {
       Promise.resolve(messageHandler(clientId, message)).catch((err) => {
@@ -102,11 +112,22 @@ function handleClientMessage(clientId: string, data: string): void {
 function removeClientFromSession(clientId: string): void {
   const client = clients.get(clientId);
   if (client?.sessionId) {
-    const sessionSet = sessionClients.get(client.sessionId);
+    const sessionId = client.sessionId;
+    const sessionSet = sessionClients.get(sessionId);
     if (sessionSet) {
       sessionSet.delete(clientId);
       if (sessionSet.size === 0) {
-        sessionClients.delete(client.sessionId);
+        sessionClients.delete(sessionId);
+        sessionControllers.delete(sessionId);
+      } else if (sessionControllers.get(sessionId) === clientId) {
+        const nextController = sessionSet.values().next().value;
+        if (nextController) {
+          sessionControllers.set(sessionId, nextController);
+          sendToClient(nextController, {
+            type: "session.control",
+            hasControl: true,
+          });
+        }
       }
     }
   }
@@ -167,6 +188,7 @@ export function stopWebSocket(): void {
     }
     clients.clear();
     sessionClients.clear();
+    sessionControllers.clear();
     wss.close();
     wss = null;
   }
@@ -227,6 +249,19 @@ export function associateClientWithSession(
   }
   sessionSet.add(clientId);
 
+  if (!sessionControllers.has(sessionId)) {
+    sessionControllers.set(sessionId, clientId);
+    sendToClient(clientId, {
+      type: "session.control",
+      hasControl: true,
+    });
+  } else {
+    sendToClient(clientId, {
+      type: "session.control",
+      hasControl: false,
+    });
+  }
+
   return true;
 }
 
@@ -266,4 +301,39 @@ export function sendToSession(
 
 export function getActiveSessions(): string[] {
   return Array.from(sessionClients.keys());
+}
+
+export function hasSessionControl(clientId: string, sessionId: string): boolean {
+  return sessionControllers.get(sessionId) === clientId;
+}
+
+export function getSessionController(sessionId: string): string | undefined {
+  return sessionControllers.get(sessionId);
+}
+
+export function requestSessionControl(clientId: string, sessionId: string): boolean {
+  const client = clients.get(clientId);
+  if (!client || client.sessionId !== sessionId) {
+    return false;
+  }
+
+  const currentController = sessionControllers.get(sessionId);
+  if (currentController === clientId) {
+    return true;
+  }
+
+  if (currentController) {
+    sendToClient(currentController, {
+      type: "session.control",
+      hasControl: false,
+    });
+  }
+
+  sessionControllers.set(sessionId, clientId);
+  sendToClient(clientId, {
+    type: "session.control",
+    hasControl: true,
+  });
+
+  return true;
 }
