@@ -6,6 +6,7 @@ export interface PtyOptions {
   projectPath?: string;
   cols?: number;
   rows?: number;
+  dangerouslySkipPermissions?: boolean;
 }
 
 export interface PtyInfo {
@@ -48,6 +49,9 @@ export function spawnClaudePty(options: PtyOptions = {}): PtyInfo {
   const args: string[] = [];
   if (options.sessionId) {
     args.push("--resume", options.sessionId);
+  }
+  if (options.dangerouslySkipPermissions) {
+    args.push("--dangerously-skip-permissions");
   }
 
   const shell = process.platform === "win32" ? "cmd.exe" : "/bin/bash";

@@ -1,3 +1,5 @@
+import { ArrowDown } from "lucide-react";
+
 interface ScrollToBottomButtonProps {
   onClick: () => void;
 }
@@ -6,21 +8,9 @@ function ScrollToBottomButton({ onClick }: ScrollToBottomButtonProps) {
   return (
     <button
       onClick={onClick}
-      className="fixed bottom-4 right-6 flex cursor-pointer items-center gap-1.5 rounded-full bg-zinc-200/90 px-3.5 py-2 text-xs font-medium text-zinc-900 shadow-lg backdrop-blur-sm transition-all hover:bg-zinc-100"
+      className="flex cursor-pointer items-center gap-1.5 rounded-full border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-400 transition-colors hover:border-zinc-600 hover:text-zinc-300"
     >
-      <svg
-        className="h-3.5 w-3.5"
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={2}
-          d="M19 14l-7 7m0 0l-7-7m7 7V3"
-        />
-      </svg>
+      <ArrowDown className="h-3 w-3" />
       <span>Latest</span>
     </button>
   );

@@ -113,13 +113,13 @@ const MessageBlock = memo(function MessageBlock(props: MessageBlockProps) {
         <div
           className={`px-3.5 py-2.5 rounded-2xl overflow-hidden ${
             isUser
-              ? "bg-indigo-600/80 text-indigo-50 rounded-br-md"
-              : "bg-cyan-700/50 text-zinc-100 rounded-bl-md"
+              ? "bg-cyan-600/50 text-zinc-100 rounded-br-md"
+              : "bg-zinc-800 text-zinc-100 rounded-bl-md"
           }`}
         >
           {typeof content === "string" ? (
             isUser ? (
-              <div className="whitespace-pre-wrap break-words text-[13px] leading-relaxed">
+              <div className="whitespace-pre-wrap wrap-break-word text-[13px] leading-relaxed">
                 {sanitizeText(content)}
               </div>
             ) : (

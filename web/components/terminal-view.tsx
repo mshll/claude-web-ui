@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -14,6 +14,7 @@ export function TerminalView({ onInput, onResize, onReady }: TerminalViewProps) 
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
+  const [isFocused, setIsFocused] = useState(false);
 
   const handleResize = useCallback(() => {
     if (fitAddonRef.current && terminalRef.current) {
@@ -83,7 +84,15 @@ export function TerminalView({ onInput, onResize, onReady }: TerminalViewProps) 
     });
     resizeObserver.observe(containerRef.current);
 
+    const handleFocus = () => setIsFocused(true);
+    const handleBlur = () => setIsFocused(false);
+
+    terminal.textarea?.addEventListener('focus', handleFocus);
+    terminal.textarea?.addEventListener('blur', handleBlur);
+
     return () => {
+      terminal.textarea?.removeEventListener('focus', handleFocus);
+      terminal.textarea?.removeEventListener('blur', handleBlur);
       resizeObserver.disconnect();
       terminal.dispose();
       terminalRef.current = null;
@@ -91,12 +100,25 @@ export function TerminalView({ onInput, onResize, onReady }: TerminalViewProps) 
     };
   }, [onInput, onResize, onReady, handleResize]);
 
+  const handleContainerClick = useCallback(() => {
+    terminalRef.current?.focus();
+  }, []);
+
   return (
     <div
       ref={containerRef}
-      className="h-full w-full bg-zinc-950"
+      className="relative h-full w-full bg-zinc-950"
       data-testid="terminal-container"
-    />
+      onClick={handleContainerClick}
+    >
+      {!isFocused && (
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+          <span className="rounded-md border border-zinc-800 bg-zinc-900/90 px-3 py-2 text-xs text-zinc-500">
+            Click to focus terminal
+          </span>
+        </div>
+      )}
+    </div>
   );
 }
 

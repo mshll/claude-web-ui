@@ -22,6 +22,7 @@ export interface ClientMessage {
   mode?: "chat" | "terminal";
   cols?: number;
   rows?: number;
+  dangerouslySkipPermissions?: boolean;
 }
 
 export interface ServerMessage {

@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo } from "react";
 import type { Session } from "@claude-run/api";
-import { PanelLeft, Copy, Check } from "lucide-react";
+import { PanelLeft } from "lucide-react";
 import { formatTime } from "./utils";
 import { ProjectSidebar } from "./components/project-sidebar";
 import SessionView from "./components/session-view";
@@ -10,44 +10,23 @@ import { useActiveSessions } from "./hooks/use-active-sessions";
 
 interface SessionHeaderProps {
   session: Session;
-  copied: boolean;
-  onCopyResumeCommand: (sessionId: string, projectPath: string) => void;
 }
 
 function SessionHeader(props: SessionHeaderProps) {
-  const { session, copied, onCopyResumeCommand } = props;
+  const { session } = props;
 
   return (
-    <>
-      <div className="flex items-center gap-3 min-w-0 flex-1">
-        <span className="text-sm text-zinc-300 truncate max-w-xs">
-          {session.display}
-        </span>
-        <span className="text-xs text-zinc-600 shrink-0">
-          {session.projectName}
-        </span>
-        <span className="text-xs text-zinc-600 shrink-0">
-          {formatTime(session.timestamp)}
-        </span>
-      </div>
-      <button
-        onClick={() => onCopyResumeCommand(session.id, session.project)}
-        className="flex items-center gap-2 px-2.5 py-1.5 text-xs text-zinc-300 bg-zinc-800 hover:bg-zinc-700 rounded transition-colors cursor-pointer shrink-0"
-        title="Copy resume command to clipboard"
-      >
-        {copied ? (
-          <>
-            <Check className="w-3.5 h-3.5 text-green-500" />
-            <span className="text-green-500">Copied!</span>
-          </>
-        ) : (
-          <>
-            <Copy className="w-3.5 h-3.5" />
-            <span>Copy Resume Command</span>
-          </>
-        )}
-      </button>
-    </>
+    <div className="flex items-center gap-3 min-w-0">
+      <span className="text-sm text-zinc-300 truncate max-w-xs">
+        {session.display}
+      </span>
+      <span className="text-[11px] text-zinc-500">
+        {session.projectName}
+      </span>
+      <span className="text-[11px] text-zinc-600 tabular-nums">
+        {formatTime(session.timestamp)}
+      </span>
+    </div>
   );
 }
 
@@ -56,7 +35,6 @@ function App() {
   const [selectedSession, setSelectedSession] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [copied, setCopied] = useState(false);
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(
     () => new Set()
   );
@@ -65,17 +43,6 @@ function App() {
     string | null
   >(null);
   const activeSessions = useActiveSessions();
-
-  const handleCopyResumeCommand = useCallback(
-    (sessionId: string, projectPath: string) => {
-      const command = `cd ${projectPath} && claude --resume ${sessionId}`;
-      navigator.clipboard.writeText(command).then(() => {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-      });
-    },
-    [],
-  );
 
   const selectedSessionData = useMemo(() => {
     if (!selectedSession) {
@@ -171,12 +138,10 @@ function App() {
             <PanelLeft className="w-4 h-4 text-zinc-400" />
           </button>
           {selectedSessionData && (
-            <SessionHeader
-              session={selectedSessionData}
-              copied={copied}
-              onCopyResumeCommand={handleCopyResumeCommand}
-            />
+            <SessionHeader session={selectedSessionData} />
           )}
+          <div className="flex-1" />
+          <div id="session-controls-portal" className="flex items-center gap-3" />
         </div>
         <div className="flex-1 overflow-hidden">
           {selectedSession ? (

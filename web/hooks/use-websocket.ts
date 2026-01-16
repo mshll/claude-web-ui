@@ -17,6 +17,7 @@ export interface ClientMessage {
   mode?: "chat" | "terminal";
   cols?: number;
   rows?: number;
+  dangerouslySkipPermissions?: boolean;
 }
 
 export interface ServerMessage {
@@ -70,7 +71,8 @@ export interface UseWebSocketReturn {
     projectPath?: string,
     mode?: "chat" | "terminal",
     cols?: number,
-    rows?: number
+    rows?: number,
+    dangerouslySkipPermissions?: boolean
   ) => boolean;
   sendMessage: (content: string) => boolean;
   interrupt: () => boolean;
@@ -232,7 +234,13 @@ export function useWebSocket(
     if (!mountedRef.current) return;
 
     if (wsRef.current) {
-      wsRef.current.close();
+      const oldWs = wsRef.current;
+      oldWs.onopen = null;
+      oldWs.onmessage = null;
+      oldWs.onerror = null;
+      oldWs.onclose = null;
+      oldWs.close();
+      wsRef.current = null;
     }
 
     clearHeartbeat();
@@ -242,7 +250,7 @@ export function useWebSocket(
     wsRef.current = ws;
 
     ws.onopen = () => {
-      if (!mountedRef.current) return;
+      if (!mountedRef.current || wsRef.current !== ws) return;
       setStatus("connected");
       retryCountRef.current = 0;
       setRetryCount(0);
@@ -250,15 +258,19 @@ export function useWebSocket(
       startHeartbeat(ws);
     };
 
-    ws.onmessage = handleMessage;
+    ws.onmessage = (event) => {
+      if (wsRef.current !== ws) return;
+      handleMessage(event);
+    };
 
     ws.onerror = (event) => {
+      if (!mountedRef.current || wsRef.current !== ws) return;
       const errorMessage = event instanceof ErrorEvent ? event.message : "WebSocket error";
       optionsRef.current.onError?.(errorMessage);
     };
 
     ws.onclose = (event) => {
-      if (!mountedRef.current) return;
+      if (!mountedRef.current || wsRef.current !== ws) return;
 
       clearHeartbeat();
       setStatus("disconnected");
@@ -277,10 +289,10 @@ export function useWebSocket(
           connect();
         }, delay);
       } else if (retryCountRef.current >= maxRetries) {
-        onError?.("Connection failed after max retries");
+        optionsRef.current.onError?.("Connection failed after max retries");
       }
     };
-  }, [url, handleMessage, maxRetries, baseDelay, onError, clearHeartbeat, flushMessageQueue, startHeartbeat]);
+  }, [url, handleMessage, maxRetries, baseDelay, clearHeartbeat, flushMessageQueue, startHeartbeat]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -296,7 +308,12 @@ export function useWebSocket(
       }
 
       if (wsRef.current) {
-        wsRef.current.close();
+        const ws = wsRef.current;
+        ws.onopen = null;
+        ws.onmessage = null;
+        ws.onerror = null;
+        ws.onclose = null;
+        ws.close();
         wsRef.current = null;
       }
 
@@ -332,7 +349,8 @@ export function useWebSocket(
       projectPath?: string,
       mode?: "chat" | "terminal",
       cols?: number,
-      rows?: number
+      rows?: number,
+      dangerouslySkipPermissions?: boolean
     ): boolean => {
       return send({
         type: "session.start",
@@ -341,6 +359,7 @@ export function useWebSocket(
         mode,
         cols,
         rows,
+        dangerouslySkipPermissions,
       });
     },
     [send]

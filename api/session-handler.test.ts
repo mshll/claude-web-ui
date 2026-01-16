@@ -238,7 +238,7 @@ describe("Session Handler - Message Round-Trip", () => {
 
       expect(mockProcessManager.sendToProcess).toHaveBeenCalledWith(
         expect.stringMatching(/^mock-proc-/),
-        JSON.stringify({ type: "user", content: "Hello Claude" })
+        JSON.stringify({ type: "user", message: { role: "user", content: "Hello Claude" } })
       );
 
       ws.close();
@@ -470,7 +470,7 @@ describe("Session Handler - Message Round-Trip", () => {
 
       expect(mockProcessManager.sendToProcess).toHaveBeenCalledWith(
         processId,
-        JSON.stringify({ type: "user", content: "What is 2+2?" })
+        JSON.stringify({ type: "user", message: { role: "user", content: "What is 2+2?" } })
       );
 
       mockProcessManager.__emitOutput(processId!, {

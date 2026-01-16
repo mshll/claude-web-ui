@@ -26,12 +26,15 @@ import {
 } from "./pty-manager";
 
 type SessionMode = "chat" | "terminal";
+type SessionStatus = "active" | "ended";
 
 interface ClientSession {
   mode: SessionMode;
   processId?: string;
   ptyId?: string;
   sessionId?: string;
+  status: SessionStatus;
+  endReason?: string;
 }
 
 const clientSessions = new Map<string, ClientSession>();
@@ -66,11 +69,12 @@ function handleProcessOutput(
       sendToClient(clientId, message);
     }
   } else if (output.type === "exit") {
+    const reason = output.signal
+      ? `Signal: ${output.signal}`
+      : `Exit code: ${output.code}`;
     const message: ServerMessage = {
       type: "session.ended",
-      reason: output.signal
-        ? `Signal: ${output.signal}`
-        : `Exit code: ${output.code}`,
+      reason,
     };
 
     if (sessionId) {
@@ -79,15 +83,21 @@ function handleProcessOutput(
       sendToClient(clientId, message);
     }
 
-    cleanupClientSession(clientId);
+    markSessionEnded(clientId, reason);
   } else if (output.type === "error") {
-    const message: ServerMessage = {
+    const reason = output.error || "Process error";
+    const errorMessage: ServerMessage = {
       type: "error",
-      message: output.error || "Process error",
+      message: reason,
+    };
+    const endedMessage: ServerMessage = {
+      type: "session.ended",
+      reason,
     };
 
-    sendToClient(clientId, message);
-    cleanupClientSession(clientId);
+    sendToClient(clientId, errorMessage);
+    sendToClient(clientId, endedMessage);
+    markSessionEnded(clientId, reason);
   }
 }
 
@@ -117,9 +127,10 @@ function handlePtyOutput(
       sendToClient(clientId, message);
     }
   } else if (output.type === "exit") {
+    const reason = `Exit code: ${output.exitCode}`;
     const message: ServerMessage = {
       type: "session.ended",
-      reason: `Exit code: ${output.exitCode}`,
+      reason,
     };
 
     if (sessionId) {
@@ -128,7 +139,23 @@ function handlePtyOutput(
       sendToClient(clientId, message);
     }
 
-    cleanupClientSession(clientId);
+    markSessionEnded(clientId, reason);
+  }
+}
+
+function markSessionEnded(clientId: string, reason: string): void {
+  const clientSession = clientSessions.get(clientId);
+  if (clientSession) {
+    clientSession.status = "ended";
+    clientSession.endReason = reason;
+    if (clientSession.processId) {
+      processClients.delete(clientSession.processId);
+      clientSession.processId = undefined;
+    }
+    if (clientSession.ptyId) {
+      ptyClients.delete(clientSession.ptyId);
+      clientSession.ptyId = undefined;
+    }
   }
 }
 
@@ -212,6 +239,7 @@ function handleSessionStart(clientId: string, message: ClientMessage): void {
         projectPath: message.projectPath,
         cols: message.cols,
         rows: message.rows,
+        dangerouslySkipPermissions: message.dangerouslySkipPermissions,
       });
     } catch (err) {
       sendToClient(clientId, {
@@ -225,6 +253,7 @@ function handleSessionStart(clientId: string, message: ClientMessage): void {
       mode: "terminal",
       ptyId: ptyInfo.id,
       sessionId: message.sessionId,
+      status: "active",
     });
     ptyClients.set(ptyInfo.id, clientId);
 
@@ -243,6 +272,7 @@ function handleSessionStart(clientId: string, message: ClientMessage): void {
       processInfo = spawnClaudeProcess({
         sessionId: message.sessionId,
         projectPath: message.projectPath,
+        dangerouslySkipPermissions: message.dangerouslySkipPermissions,
       });
     } catch (err) {
       sendToClient(clientId, {
@@ -256,6 +286,7 @@ function handleSessionStart(clientId: string, message: ClientMessage): void {
       mode: "chat",
       processId: processInfo.id,
       sessionId: message.sessionId,
+      status: "active",
     });
     processClients.set(processInfo.id, clientId);
 
@@ -281,6 +312,16 @@ function handleMessageSend(clientId: string, message: ClientMessage): void {
     return;
   }
 
+  if (clientSession.status === "ended") {
+    sendToClient(clientId, {
+      type: "error",
+      message: clientSession.endReason
+        ? `Session ended: ${clientSession.endReason}`
+        : "Session has ended",
+    });
+    return;
+  }
+
   if (!message.content) {
     sendToClient(clientId, {
       type: "error",
@@ -300,7 +341,10 @@ function handleMessageSend(clientId: string, message: ClientMessage): void {
   } else if (clientSession.processId) {
     const jsonMessage = JSON.stringify({
       type: "user",
-      content: message.content,
+      message: {
+        role: "user",
+        content: message.content,
+      },
     });
 
     const success = sendToProcess(clientSession.processId, jsonMessage);

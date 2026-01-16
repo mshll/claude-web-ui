@@ -318,7 +318,12 @@ export async function getSessions(): Promise<Session[]> {
   });
 }
 
-export async function getProjects(): Promise<string[]> {
+interface ProjectInfo {
+  path: string;
+  name: string;
+}
+
+export async function getProjects(): Promise<ProjectInfo[]> {
   const entries = historyCache ?? (await loadHistoryCache());
   const projects = new Set<string>();
 
@@ -328,7 +333,12 @@ export async function getProjects(): Promise<string[]> {
     }
   }
 
-  return [...projects].sort();
+  return [...projects]
+    .sort()
+    .map((path) => ({
+      path,
+      name: basename(path),
+    }));
 }
 
 export async function getConversation(

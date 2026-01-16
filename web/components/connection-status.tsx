@@ -25,9 +25,9 @@ export function ConnectionStatusIndicator(props: ConnectionStatusProps) {
   const config = statusConfig[status];
 
   return (
-    <div className="flex items-center gap-2 text-xs text-zinc-400">
-      <span className={`h-2 w-2 rounded-full ${config.color}`} />
-      <span>{config.label}</span>
-    </div>
+    <span
+      className={`h-2 w-2 rounded-full ${config.color}`}
+      title={config.label}
+    />
   );
 }

@@ -5,6 +5,7 @@ export interface ProcessOptions {
   sessionId?: string;
   projectPath?: string;
   model?: string;
+  dangerouslySkipPermissions?: boolean;
 }
 
 export interface ProcessInfo {
@@ -50,6 +51,10 @@ function buildClaudeArgs(options: ProcessOptions): string[] {
 
   if (options.model) {
     args.push("--model", options.model);
+  }
+
+  if (options.dangerouslySkipPermissions) {
+    args.push("--dangerously-skip-permissions");
   }
 
   return args;

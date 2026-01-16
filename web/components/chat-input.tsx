@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import { Send, Square } from "lucide-react";
+import { ArrowUp, Square } from "lucide-react";
 
 interface ChatInputProps {
   onSend: (message: string) => void;
@@ -26,8 +26,9 @@ export function ChatInput(props: ChatInputProps) {
     if (!textarea) return;
 
     textarea.style.height = "auto";
+    const minHeight = 50;
     const maxHeight = 200;
-    textarea.style.height = `${Math.min(textarea.scrollHeight, maxHeight)}px`;
+    textarea.style.height = `${Math.max(minHeight, Math.min(textarea.scrollHeight, maxHeight))}px`;
   }, []);
 
   useEffect(() => {
@@ -57,9 +58,9 @@ export function ChatInput(props: ChatInputProps) {
   const showInterrupt = isProcessing && onInterrupt;
 
   return (
-    <div className="border-t border-zinc-800/60 bg-zinc-900/80 px-4 py-3">
+    <div className="bg-zinc-950 px-4 pb-4 pt-2">
       <div className="mx-auto max-w-3xl">
-        <div className="flex items-end gap-2 rounded-xl border border-zinc-700/50 bg-zinc-800/50 px-3 py-2">
+        <div className="flex items-end gap-3 rounded-lg border border-zinc-800 bg-zinc-950 p-3">
           <textarea
             ref={textareaRef}
             value={value}
@@ -68,32 +69,30 @@ export function ChatInput(props: ChatInputProps) {
             placeholder={placeholder}
             disabled={disabled}
             rows={1}
-            className="flex-1 resize-none bg-transparent text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none disabled:opacity-50"
+            style={{ minHeight: '50px' }}
+            className="flex-1 resize-none bg-transparent text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none disabled:opacity-50"
           />
           {showInterrupt ? (
             <button
               type="button"
               onClick={handleInterrupt}
-              className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-rose-600 text-white transition-colors hover:bg-rose-500"
+              className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md bg-red-600 text-white transition-colors hover:bg-red-500"
               title="Interrupt"
             >
-              <Square className="h-4 w-4" />
+              <Square className="h-3.5 w-3.5" />
             </button>
           ) : (
             <button
               type="button"
               onClick={handleSubmit}
               disabled={!canSend}
-              className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-cyan-600 text-white transition-colors hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-cyan-600"
+              className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md bg-zinc-700 text-zinc-300 transition-colors hover:bg-zinc-600 disabled:cursor-not-allowed disabled:bg-zinc-800 disabled:text-zinc-600"
               title="Send message"
             >
-              <Send className="h-4 w-4" />
+              <ArrowUp className="h-4 w-4" />
             </button>
           )}
         </div>
-        <p className="mt-1.5 text-center text-[11px] text-zinc-600">
-          Press Enter to send, Shift+Enter for new line
-        </p>
       </div>
     </div>
   );
