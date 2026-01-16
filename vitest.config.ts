@@ -6,5 +6,9 @@ export default defineConfig({
   test: {
     include: ["api/**/*.test.ts", "web/**/*.test.tsx", "web/**/*.test.ts"],
     environment: "node",
+    environmentMatchGlobs: [
+      ["web/**/*.test.tsx", "jsdom"],
+    ],
+    setupFiles: ["./vitest.setup.ts"],
   },
 });

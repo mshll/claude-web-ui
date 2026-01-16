@@ -2,6 +2,8 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import type { ConversationMessage } from "@claude-run/api";
 import MessageBlock from "./message-block";
 import ScrollToBottomButton from "./scroll-to-bottom-button";
+import { ChatInput } from "./chat-input";
+import { useWebSocket } from "../hooks/use-websocket";
 
 const MAX_RETRIES = 10;
 const BASE_RETRY_DELAY_MS = 1000;
@@ -10,14 +12,21 @@ const SCROLL_THRESHOLD_PX = 100;
 
 interface SessionViewProps {
   sessionId: string;
+  projectPath?: string;
+}
+
+function getWebSocketUrl(): string {
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${protocol}//${window.location.host}/ws`;
 }
 
 function SessionView(props: SessionViewProps) {
-  const { sessionId } = props;
+  const { sessionId, projectPath } = props;
 
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [autoScroll, setAutoScroll] = useState(true);
+  const [isProcessing, setIsProcessing] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const lastMessageRef = useRef<HTMLDivElement>(null);
   const offsetRef = useRef(0);
@@ -26,6 +35,27 @@ function SessionView(props: SessionViewProps) {
   const eventSourceRef = useRef<EventSource | null>(null);
   const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const mountedRef = useRef(true);
+
+  const {
+    status: wsStatus,
+    activeSessionId,
+    startSession,
+    sendMessage,
+    interrupt,
+  } = useWebSocket(getWebSocketUrl(), {
+    onSessionStarted: () => {
+      setIsProcessing(false);
+    },
+    onAssistantChunk: () => {
+      setIsProcessing(true);
+    },
+    onSessionEnded: () => {
+      setIsProcessing(false);
+    },
+    onError: () => {
+      setIsProcessing(false);
+    },
+  });
 
   const connect = useCallback(() => {
     if (!mountedRef.current) {
@@ -78,6 +108,7 @@ function SessionView(props: SessionViewProps) {
     setMessages([]);
     offsetRef.current = 0;
     retryCountRef.current = 0;
+    setIsProcessing(false);
 
     connect();
 
@@ -119,10 +150,30 @@ function SessionView(props: SessionViewProps) {
     setAutoScroll(isAtBottom);
   };
 
+  const handleSendMessage = useCallback((content: string) => {
+    if (wsStatus !== "connected") {
+      return;
+    }
+
+    if (!activeSessionId) {
+      startSession(sessionId, projectPath);
+    }
+
+    setIsProcessing(true);
+    sendMessage(content);
+  }, [wsStatus, activeSessionId, sessionId, projectPath, startSession, sendMessage]);
+
+  const handleInterrupt = useCallback(() => {
+    interrupt();
+    setIsProcessing(false);
+  }, [interrupt]);
+
   const summary = messages.find((m) => m.type === "summary");
   const conversationMessages = messages.filter(
     (m) => m.type === "user" || m.type === "assistant"
   );
+
+  const isConnected = wsStatus === "connected";
 
   if (loading) {
     return (
@@ -133,11 +184,11 @@ function SessionView(props: SessionViewProps) {
   }
 
   return (
-    <div className="relative h-full">
+    <div className="relative flex h-full flex-col">
       <div
         ref={containerRef}
         onScroll={handleScroll}
-        className="h-full overflow-y-auto bg-zinc-950"
+        className="flex-1 overflow-y-auto bg-zinc-950"
       >
         <div className="mx-auto max-w-3xl px-4 py-4">
           {summary && (
@@ -176,6 +227,14 @@ function SessionView(props: SessionViewProps) {
           }}
         />
       )}
+
+      <ChatInput
+        onSend={handleSendMessage}
+        onInterrupt={handleInterrupt}
+        disabled={!isConnected}
+        isProcessing={isProcessing}
+        placeholder={isConnected ? "Send a message..." : "Connecting..."}
+      />
     </div>
   );
 }

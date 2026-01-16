@@ -161,7 +161,10 @@ function App() {
         </div>
         <div className="flex-1 overflow-hidden">
           {selectedSession ? (
-            <SessionView sessionId={selectedSession} />
+            <SessionView
+              sessionId={selectedSession}
+              projectPath={selectedSessionData?.project}
+            />
           ) : (
             <div className="flex h-full items-center justify-center text-zinc-600">
               <div className="text-center">

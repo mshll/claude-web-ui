@@ -164,7 +164,7 @@ Browser                    Backend                     Claude CLI
 ### Phase 2: Chat Mode Integration
 - [x] Create chat-input component
 - [x] Implement use-websocket hook
-- [ ] Integrate with session-view
+- [x] Integrate with session-view
 - [ ] Handle message streaming and rendering
 - [ ] Add connection status indicator
 

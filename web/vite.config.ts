@@ -33,6 +33,10 @@ export default defineConfig({
           });
         },
       },
+      "/ws": {
+        target: "ws://localhost:12001",
+        ws: true,
+      },
     },
   },
   build: {

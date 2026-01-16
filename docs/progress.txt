@@ -240,3 +240,43 @@
 - `web/hooks/use-websocket.test.ts` - New file: Hook tests with mocked WebSocket
 - `vitest.config.ts` - Added web/**/*.test.ts to include pattern
 - `docs/PRD.md` - Marked task complete
+
+---
+
+## 2026-01-16: Phase 2 Task 3 - Integrate with session-view
+
+### Completed
+- Integrated `ChatInput` component and `useWebSocket` hook into `session-view.tsx`:
+  - Added WebSocket connection using `useWebSocket` hook
+  - ChatInput displayed at bottom of session view
+  - Processing state tracking (shows interrupt button when processing)
+  - WebSocket URL generation based on current protocol (ws/wss)
+  - Automatic session start when first message is sent
+  - Interrupt functionality to stop running operations
+- Updated `app.tsx` to pass `projectPath` prop to `SessionView`
+- Added WebSocket proxy to Vite config for development
+- Added `@testing-library/jest-dom` for enhanced test matchers
+- Created `vitest.setup.ts` for test setup (jest-dom matchers, scrollIntoView mock)
+- Updated vitest configuration with setupFiles
+- Added 12 tests (108 total) covering:
+  - Initial loading state
+  - Chat input rendering after messages load
+  - Loading state hiding after messages load
+  - "Connecting..." placeholder when WebSocket disconnected
+  - Disabled chat input when disconnected
+  - startSession called when sending first message
+  - startSession skipped when session already active
+  - interrupt callback on interrupt button click
+  - WebSocket URL format (ws/wss)
+  - EventSource URL and offset
+  - EventSource recreation on sessionId change
+
+### Files Changed
+- `web/components/session-view.tsx` - Integrated ChatInput and useWebSocket
+- `web/components/session-view.test.tsx` - New file: Integration tests
+- `web/app.tsx` - Pass projectPath to SessionView
+- `web/vite.config.ts` - Added /ws WebSocket proxy
+- `vitest.setup.ts` - New file: Test setup with jest-dom and scrollIntoView mock
+- `vitest.config.ts` - Added setupFiles configuration
+- `package.json` - Added @testing-library/jest-dom dependency
+- `docs/PRD.md` - Marked task complete
