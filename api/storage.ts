@@ -16,6 +16,7 @@ export interface Session {
   timestamp: number;
   project: string;
   projectName: string;
+  messageCount: number;
 }
 
 export interface ConversationMessage {
@@ -228,6 +229,35 @@ async function findSessionFile(sessionId: string): Promise<string | null> {
   return null;
 }
 
+function isSlashCommand(display: string): boolean {
+  return display.startsWith("/") && !display.includes(" ");
+}
+
+async function countAssistantMessages(sessionId: string): Promise<number> {
+  const filePath = await findSessionFile(sessionId);
+  if (!filePath) return 0;
+
+  try {
+    const content = await readFile(filePath, "utf-8");
+    const lines = content.trim().split("\n").filter(Boolean);
+    let count = 0;
+
+    for (const line of lines) {
+      try {
+        const msg = JSON.parse(line);
+        if (msg.type === "assistant") {
+          count++;
+        }
+      } catch {
+        // Skip malformed
+      }
+    }
+    return count;
+  } catch {
+    return 0;
+  }
+}
+
 export async function loadStorage(): Promise<void> {
   await Promise.all([buildFileIndex(), loadHistoryCache()]);
 }
@@ -235,10 +265,20 @@ export async function loadStorage(): Promise<void> {
 export async function getSessions(): Promise<Session[]> {
   return dedupe("getSessions", async () => {
     const entries = historyCache ?? (await loadHistoryCache());
-    const sessions: Session[] = [];
     const seenIds = new Set<string>();
+    const pendingSessions: Array<{
+      id: string;
+      display: string;
+      timestamp: number;
+      project: string;
+      projectName: string;
+    }> = [];
 
     for (const entry of entries) {
+      if (isSlashCommand(entry.display)) {
+        continue;
+      }
+
       let sessionId = entry.sessionId;
       if (!sessionId) {
         const encodedProject = encodeProjectPath(entry.project);
@@ -250,13 +290,28 @@ export async function getSessions(): Promise<Session[]> {
       }
 
       seenIds.add(sessionId);
-      sessions.push({
+      pendingSessions.push({
         id: sessionId,
         display: entry.display,
         timestamp: entry.timestamp,
         project: entry.project,
         projectName: getProjectName(entry.project),
       });
+    }
+
+    const messageCounts = await Promise.all(
+      pendingSessions.map((s) => countAssistantMessages(s.id))
+    );
+
+    const sessions: Session[] = [];
+    for (let i = 0; i < pendingSessions.length; i++) {
+      const messageCount = messageCounts[i];
+      if (messageCount > 0) {
+        sessions.push({
+          ...pendingSessions[i],
+          messageCount,
+        });
+      }
     }
 
     return sessions.sort((a, b) => b.timestamp - a.timestamp);

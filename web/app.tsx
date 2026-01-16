@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo } from "react";
 import type { Session } from "@claude-run/api";
 import { PanelLeft, Copy, Check } from "lucide-react";
 import { formatTime } from "./utils";
-import SessionList from "./components/session-list";
+import { ProjectSidebar } from "./components/project-sidebar";
 import SessionView from "./components/session-view";
 import { useEventSource } from "./hooks/use-event-source";
 
@@ -51,12 +51,13 @@ function SessionHeader(props: SessionHeaderProps) {
 
 function App() {
   const [sessions, setSessions] = useState<Session[]>([]);
-  const [projects, setProjects] = useState<string[]>([]);
-  const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [selectedSession, setSelectedSession] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [expandedProjects, setExpandedProjects] = useState<Set<string>>(
+    () => new Set()
+  );
 
   const handleCopyResumeCommand = useCallback(
     (sessionId: string, projectPath: string) => {
@@ -77,11 +78,16 @@ function App() {
     return sessions.find((s) => s.id === selectedSession) || null;
   }, [sessions, selectedSession]);
 
-  useEffect(() => {
-    fetch("/api/projects")
-      .then((res) => res.json())
-      .then(setProjects)
-      .catch(console.error);
+  const handleToggleProject = useCallback((project: string) => {
+    setExpandedProjects((prev) => {
+      const next = new Set(prev);
+      if (next.has(project)) {
+        next.delete(project);
+      } else {
+        next.add(project);
+      }
+      return next;
+    });
   }, []);
 
   const handleSessionsFull = useCallback((event: MessageEvent) => {
@@ -115,13 +121,6 @@ function App() {
     onError: handleSessionsError,
   });
 
-  const filteredSessions = useMemo(() => {
-    if (!selectedProject) {
-      return sessions;
-    }
-    return sessions.filter((s) => s.project === selectedProject);
-  }, [sessions, selectedProject]);
-
   const handleSelectSession = useCallback((sessionId: string) => {
     setSelectedSession(sessionId);
   }, []);
@@ -130,37 +129,19 @@ function App() {
     <div className="flex h-screen bg-zinc-950 text-zinc-100">
       {!sidebarCollapsed && (
         <aside className="w-80 border-r border-zinc-800/60 flex flex-col bg-zinc-950">
-          <div className="border-b border-zinc-800/60">
-            <label htmlFor={"select-project"} className="block w-full px-1">
-              <select
-                id={"select-project"}
-                value={selectedProject || ""}
-                onChange={(e) => setSelectedProject(e.target.value || null)}
-                className="w-full h-[50px] bg-transparent text-zinc-300 text-sm focus:outline-none cursor-pointer px-5 py-4"
-              >
-                <option value="">All Projects</option>
-                {projects.map((project) => {
-                  const name = project.split("/").pop() || project;
-                  return (
-                    <option key={project} value={project}>
-                      {name}
-                    </option>
-                  );
-                })}
-              </select>
-            </label>
-          </div>
-          <SessionList
-            sessions={filteredSessions}
+          <ProjectSidebar
+            sessions={sessions}
             selectedSession={selectedSession}
             onSelectSession={handleSelectSession}
+            expandedProjects={expandedProjects}
+            onToggleProject={handleToggleProject}
             loading={loading}
           />
         </aside>
       )}
 
       <main className="flex-1 overflow-hidden bg-zinc-950 flex flex-col">
-        <div className="h-[50px] border-b border-zinc-800/60 flex items-center px-4 gap-4">
+        <div className="h-10 border-b border-zinc-800/60 flex items-center px-4 gap-4">
           <button
             onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
             className="p-1.5 hover:bg-zinc-800 rounded transition-colors cursor-pointer"
