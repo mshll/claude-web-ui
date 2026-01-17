@@ -1,6 +1,6 @@
 {
   "name": "claude-web-ui",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Web UI for browsing and interacting with Claude Code sessions",
   "type": "module",
   "bin": {
@@ -40,6 +40,8 @@
     "react-dom": "^19.2.3",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
+    "socket.io": "^4.8.3",
+    "socket.io-client": "^4.8.3",
     "ws": "^8.19.0"
   },
   "devDependencies": {
