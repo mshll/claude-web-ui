@@ -423,16 +423,17 @@ function SessionView(props: SessionViewProps) {
 
                 <div className="flex flex-col gap-2">
                   {allMessages.map((message, index) => (
-                    <div key={message.uuid || index} ref={index === allMessages.length - 1 && !isStreaming ? lastMessageRef : undefined}>
+                    <div key={message.uuid || index}>
                       <MessageBlock message={message} />
                     </div>
                   ))}
                   {(isStreaming || isWaitingForResponse) && (
-                    <div ref={lastMessageRef} className="flex items-center gap-2 py-3">
+                    <div className="flex items-center gap-2 py-3">
                       <Loader2 className="h-4 w-4 animate-spin text-zinc-500" />
                       <span className="text-sm text-zinc-500">Thinking...</span>
                     </div>
                   )}
+                  <div ref={lastMessageRef} aria-hidden="true" />
                 </div>
               </div>
             </div>
