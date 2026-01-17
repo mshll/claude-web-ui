@@ -21,9 +21,9 @@ function getVersion(): string {
 }
 
 program
-  .name("claude-run")
+  .name("claude-web-ui")
   .description(
-    "A beautiful web UI for browsing Claude Code conversation history"
+    "Web UI for browsing and interacting with Claude Code sessions"
   )
   .version(getVersion())
   .option("-p, --port <number>", "Port to listen on", "12001")

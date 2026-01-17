@@ -1,6 +1,6 @@
 import { useState, useMemo, memo } from "react";
 import { ChevronRight, ChevronDown, Plus } from "lucide-react";
-import type { Session } from "@claude-run/api";
+import type { Session } from "@claude-web-ui/api";
 import { formatTime } from "../utils";
 
 interface ProjectSidebarProps {

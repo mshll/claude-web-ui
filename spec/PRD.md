@@ -2,7 +2,7 @@
 
 ## Overview
 
-Enable users to continue Claude Code sessions directly from the web UI, transforming claude-run from a read-only viewer into an interactive chat interface.
+Enable users to continue Claude Code sessions directly from the web UI, transforming claude-web-ui from a read-only viewer into an interactive chat interface.
 
 ## Goals
 
@@ -219,5 +219,5 @@ Browser                    Backend                     Claude CLI
 ## Design Decisions
 
 1. **Authentication**: None required - local-only access like current viewer
-2. **Process cleanup**: PID file tracking - write active PIDs to `~/.claude-run/pids.json`, cleanup on restart
+2. **Process cleanup**: PID file tracking - write active PIDs to `~/.claude-web-ui/pids.json`, cleanup on restart
 3. **Resource limits**: 5-10 max concurrent sessions with configurable limit

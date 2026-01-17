@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from "react";
-import type { ConversationMessage, ContentBlock } from "@claude-run/api";
+import type { ConversationMessage, ContentBlock } from "@claude-web-ui/api";
 
 export interface StreamingMessage {
   id: string;

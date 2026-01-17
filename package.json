@@ -1,10 +1,10 @@
 {
-  "name": "claude-run",
-  "version": "0.2.2",
-  "description": "A beautiful web UI for browsing Claude Code conversation history",
+  "name": "claude-web-ui",
+  "version": "0.3.0",
+  "description": "Web UI for browsing and interacting with Claude Code sessions",
   "type": "module",
   "bin": {
-    "claude-run": "./dist/index.js"
+    "claude-web-ui": "./dist/index.js"
   },
   "main": "./dist/index.js",
   "files": [
@@ -76,14 +76,14 @@
     "ai",
     "anthropic"
   ],
-  "author": "Kamran Ahmed",
+  "author": "mshll",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/kamranahmedse/claude-run.git"
+    "url": "git+https://github.com/mshll/claude-web-ui.git"
   },
-  "homepage": "https://github.com/kamranahmedse/claude-run#readme",
+  "homepage": "https://github.com/mshll/claude-web-ui#readme",
   "bugs": {
-    "url": "https://github.com/kamranahmedse/claude-run/issues"
+    "url": "https://github.com/mshll/claude-web-ui/issues"
   }
 }

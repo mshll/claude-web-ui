@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo } from "react";
-import type { Session } from "@claude-run/api";
+import type { Session } from "@claude-web-ui/api";
 import { PanelLeft } from "lucide-react";
 import { formatTime } from "./utils";
 import { ProjectSidebar } from "./components/project-sidebar";

@@ -1,5 +1,5 @@
 import { useState, memo } from "react";
-import type { ConversationMessage, ContentBlock } from "@claude-run/api";
+import type { ConversationMessage, ContentBlock } from "@claude-web-ui/api";
 import {
   Lightbulb,
   Wrench,

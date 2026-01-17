@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import type { ConversationMessage } from '@claude-run/api';
+import type { ConversationMessage } from '@claude-web-ui/api';
 import { MessageSquare, Terminal as TerminalIcon, ShieldOff, Loader2 } from 'lucide-react';
 import MessageBlock from './message-block';
 import ScrollToBottomButton from './scroll-to-bottom-button';
