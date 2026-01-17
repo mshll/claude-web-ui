@@ -1,4 +1,4 @@
-import { WebSocketServer, WebSocket } from "ws";
+import { Server as SocketIOServer, Socket } from "socket.io";
 import type { Server as HttpServer } from "http";
 
 export interface WebSocketMessage {
@@ -47,8 +47,7 @@ export interface ServerMessage {
 
 export interface ClientInfo {
   id: string;
-  ws: WebSocket;
-  isAlive: boolean;
+  socket: Socket;
   sessionId?: string;
 }
 
@@ -60,26 +59,14 @@ export type MessageHandler = (
 const clients = new Map<string, ClientInfo>();
 const sessionClients = new Map<string, Set<string>>();
 const sessionControllers = new Map<string, string>();
-let wss: WebSocketServer | null = null;
-let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
+let io: SocketIOServer | null = null;
 let messageHandler: MessageHandler | null = null;
 
 function generateClientId(): string {
   return `client-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
-function handleClientMessage(clientId: string, data: string): void {
-  let message: ClientMessage;
-  try {
-    message = JSON.parse(data) as ClientMessage;
-  } catch {
-    sendToClient(clientId, {
-      type: "error",
-      message: "Invalid JSON message",
-    });
-    return;
-  }
-
+function handleClientMessage(clientId: string, message: ClientMessage): void {
   if (!message.type) {
     sendToClient(clientId, {
       type: "error",
@@ -134,83 +121,69 @@ function removeClientFromSession(clientId: string): void {
   }
 }
 
-export function initWebSocket(server: HttpServer): WebSocketServer {
-  wss = new WebSocketServer({ server, path: "/ws" });
-
-  wss.on("connection", (ws) => {
-    const clientId = generateClientId();
-    const clientInfo: ClientInfo = { id: clientId, ws, isAlive: true };
-    clients.set(clientId, clientInfo);
-
-    ws.on("pong", () => {
-      clientInfo.isAlive = true;
-    });
-
-    ws.on("message", (data) => {
-      handleClientMessage(clientId, data.toString());
-    });
-
-    ws.on("close", () => {
-      removeClientFromSession(clientId);
-      clients.delete(clientId);
-    });
-
-    ws.on("error", () => {
-      removeClientFromSession(clientId);
-      clients.delete(clientId);
-    });
-
-    sendToClient(clientId, { type: "connected", clientId });
+export function initWebSocket(server: HttpServer): SocketIOServer {
+  io = new SocketIOServer(server, {
+    path: "/socket.io",
+    cors: {
+      origin: ["http://localhost:12000", "http://localhost:12001"],
+      methods: ["GET", "POST"],
+    },
+    transports: ["websocket", "polling"],
+    pingInterval: 25000,
+    pingTimeout: 20000,
   });
 
-  heartbeatInterval = setInterval(() => {
-    for (const [clientId, client] of clients) {
-      if (!client.isAlive) {
-        client.ws.terminate();
-        clients.delete(clientId);
-        continue;
-      }
-      client.isAlive = false;
-      client.ws.ping();
-    }
-  }, 30000);
+  io.on("connection", (socket: Socket) => {
+    const clientId = generateClientId();
+    const clientInfo: ClientInfo = { id: clientId, socket };
+    clients.set(clientId, clientInfo);
 
-  return wss;
+    socket.emit("message", { type: "connected", clientId });
+
+    socket.on("message", (data: ClientMessage) => {
+      handleClientMessage(clientId, data);
+    });
+
+    socket.on("disconnect", () => {
+      removeClientFromSession(clientId);
+      clients.delete(clientId);
+    });
+
+    socket.on("error", () => {
+      removeClientFromSession(clientId);
+      clients.delete(clientId);
+    });
+  });
+
+  return io;
 }
 
 export function stopWebSocket(): void {
-  if (heartbeatInterval) {
-    clearInterval(heartbeatInterval);
-    heartbeatInterval = null;
-  }
-  if (wss) {
+  if (io) {
     for (const client of clients.values()) {
-      client.ws.terminate();
+      client.socket.disconnect(true);
     }
     clients.clear();
     sessionClients.clear();
     sessionControllers.clear();
-    wss.close();
-    wss = null;
+    io.close();
+    io = null;
   }
   messageHandler = null;
 }
 
 export function sendToClient(clientId: string, message: WebSocketMessage): boolean {
   const client = clients.get(clientId);
-  if (!client || client.ws.readyState !== WebSocket.OPEN) {
+  if (!client || !client.socket.connected) {
     return false;
   }
-  client.ws.send(JSON.stringify(message));
+  client.socket.emit("message", message);
   return true;
 }
 
 export function broadcast(message: WebSocketMessage): void {
-  const data = JSON.stringify(message);
-  for (const client of clients.values()) {
-    if (client.ws.readyState === WebSocket.OPEN) {
-      client.ws.send(data);
-    }
+  if (io) {
+    io.emit("message", message);
   }
 }
 
@@ -222,8 +195,8 @@ export function getClientCount(): number {
   return clients.size;
 }
 
-export function getWebSocketServer(): WebSocketServer | null {
-  return wss;
+export function getSocketIOServer(): SocketIOServer | null {
+  return io;
 }
 
 export function setMessageHandler(handler: MessageHandler): void {
@@ -242,6 +215,7 @@ export function associateClientWithSession(
   removeClientFromSession(clientId);
 
   client.sessionId = sessionId;
+  client.socket.join(`session-${sessionId}`);
 
   let sessionSet = sessionClients.get(sessionId);
   if (!sessionSet) {
@@ -272,6 +246,8 @@ export function dissociateClientFromSession(clientId: string): boolean {
     return false;
   }
 
+  const sessionId = client.sessionId;
+  client.socket.leave(`session-${sessionId}`);
   removeClientFromSession(clientId);
   client.sessionId = undefined;
   return true;

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback, useState } from "react";
+import { io, Socket } from "socket.io-client";
 
 export type ConnectionStatus = "disconnected" | "connecting" | "connected";
 
@@ -49,14 +50,6 @@ export interface UseWebSocketOptions {
   onError?: (message: string) => void;
   onReconnecting?: (attempt: number, maxRetries: number) => void;
   maxRetries?: number;
-  baseDelay?: number;
-  heartbeatInterval?: number;
-  heartbeatTimeout?: number;
-}
-
-interface QueuedMessage {
-  message: ClientMessage;
-  timestamp: number;
 }
 
 export interface UseWebSocketReturn {
@@ -77,15 +70,10 @@ export interface UseWebSocketReturn {
   sendMessage: (content: string) => boolean;
   interrupt: () => boolean;
   closeSession: () => boolean;
-  switchMode: (mode: "chat" | "terminal", cols?: number, rows?: number) => boolean;
+  switchMode: (mode: "chat" | "terminal", cols?: number, rows?: number, dangerouslySkipPermissions?: boolean) => boolean;
   sendTerminalInput: (data: string) => boolean;
   resizeTerminal: (cols: number, rows: number) => boolean;
   reconnect: () => void;
-}
-
-function addJitter(delay: number, jitterFactor: number = 0.3): number {
-  const jitter = delay * jitterFactor * (Math.random() * 2 - 1);
-  return Math.max(0, delay + jitter);
 }
 
 export function useWebSocket(
@@ -102,9 +90,6 @@ export function useWebSocket(
     onError,
     onReconnecting,
     maxRetries = 10,
-    baseDelay = 1000,
-    heartbeatInterval = 25000,
-    heartbeatTimeout = 10000,
   } = options;
 
   const [status, setStatus] = useState<ConnectionStatus>("disconnected");
@@ -113,51 +98,19 @@ export function useWebSocket(
   const [hasControl, setHasControl] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
 
-  const wsRef = useRef<WebSocket | null>(null);
-  const retryCountRef = useRef(0);
-  const retryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const socketRef = useRef<Socket | null>(null);
   const mountedRef = useRef(true);
-  const messageQueueRef = useRef<QueuedMessage[]>([]);
-  const heartbeatIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const heartbeatTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastPongRef = useRef<number>(Date.now());
+  const messageQueueRef = useRef<ClientMessage[]>([]);
 
   const optionsRef = useRef(options);
   optionsRef.current = options;
 
-  const clearHeartbeat = useCallback(() => {
-    if (heartbeatIntervalRef.current) {
-      clearInterval(heartbeatIntervalRef.current);
-      heartbeatIntervalRef.current = null;
-    }
-    if (heartbeatTimeoutRef.current) {
-      clearTimeout(heartbeatTimeoutRef.current);
-      heartbeatTimeoutRef.current = null;
-    }
-  }, []);
-
-  const handleMessage = useCallback((event: MessageEvent) => {
-    let message: ServerMessage;
-    try {
-      message = JSON.parse(event.data) as ServerMessage;
-    } catch {
-      optionsRef.current.onError?.("Invalid message from server");
-      return;
-    }
-
+  const handleMessage = useCallback((message: ServerMessage) => {
     optionsRef.current.onMessage?.(message);
 
     switch (message.type) {
       case "connected":
         setClientId(message.clientId ?? null);
-        break;
-
-      case "pong":
-        lastPongRef.current = Date.now();
-        if (heartbeatTimeoutRef.current) {
-          clearTimeout(heartbeatTimeoutRef.current);
-          heartbeatTimeoutRef.current = null;
-        }
         break;
 
       case "session.started":
@@ -194,105 +147,82 @@ export function useWebSocket(
     }
   }, []);
 
-  const flushMessageQueue = useCallback((ws: WebSocket) => {
-    const now = Date.now();
-    const maxAge = 30000;
-
-    while (messageQueueRef.current.length > 0) {
-      const queued = messageQueueRef.current[0];
-      if (now - queued.timestamp > maxAge) {
-        messageQueueRef.current.shift();
-        continue;
-      }
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify(queued.message));
-        messageQueueRef.current.shift();
-      } else {
-        break;
+  const flushMessageQueue = useCallback((socket: Socket) => {
+    while (messageQueueRef.current.length > 0 && socket.connected) {
+      const queued = messageQueueRef.current.shift();
+      if (queued) {
+        socket.emit("message", queued);
       }
     }
   }, []);
 
-  const startHeartbeat = useCallback((ws: WebSocket) => {
-    clearHeartbeat();
-    lastPongRef.current = Date.now();
-
-    heartbeatIntervalRef.current = setInterval(() => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: "ping" }));
-
-        heartbeatTimeoutRef.current = setTimeout(() => {
-          if (mountedRef.current && Date.now() - lastPongRef.current > heartbeatTimeout) {
-            ws.close();
-          }
-        }, heartbeatTimeout);
-      }
-    }, heartbeatInterval);
-  }, [clearHeartbeat, heartbeatInterval, heartbeatTimeout]);
-
   const connect = useCallback(() => {
     if (!mountedRef.current) return;
 
-    if (wsRef.current) {
-      const oldWs = wsRef.current;
-      oldWs.onopen = null;
-      oldWs.onmessage = null;
-      oldWs.onerror = null;
-      oldWs.onclose = null;
-      oldWs.close();
-      wsRef.current = null;
+    if (socketRef.current) {
+      socketRef.current.disconnect();
+      socketRef.current = null;
     }
 
-    clearHeartbeat();
     setStatus("connecting");
 
-    const ws = new WebSocket(url);
-    wsRef.current = ws;
+    const serverUrl = url.replace(/\/ws$/, "").replace(/\/$/, "");
 
-    ws.onopen = () => {
-      if (!mountedRef.current || wsRef.current !== ws) return;
+    const socket = io(serverUrl, {
+      path: "/socket.io",
+      transports: ["websocket", "polling"],
+      reconnection: true,
+      reconnectionAttempts: maxRetries,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 30000,
+      timeout: 20000,
+    });
+
+    socketRef.current = socket;
+
+    socket.on("connect", () => {
+      if (!mountedRef.current || socketRef.current !== socket) return;
       setStatus("connected");
-      retryCountRef.current = 0;
       setRetryCount(0);
-      flushMessageQueue(ws);
-      startHeartbeat(ws);
-    };
+      flushMessageQueue(socket);
+    });
 
-    ws.onmessage = (event) => {
-      if (wsRef.current !== ws) return;
-      handleMessage(event);
-    };
+    socket.on("message", (data: ServerMessage) => {
+      if (socketRef.current !== socket) return;
+      handleMessage(data);
+    });
 
-    ws.onerror = (event) => {
-      if (!mountedRef.current || wsRef.current !== ws) return;
-      const errorMessage = event instanceof ErrorEvent ? event.message : "WebSocket error";
-      optionsRef.current.onError?.(errorMessage);
-    };
+    socket.on("connect_error", (error) => {
+      if (!mountedRef.current || socketRef.current !== socket) return;
+      optionsRef.current.onError?.(error.message || "Connection error");
+    });
 
-    ws.onclose = (event) => {
-      if (!mountedRef.current || wsRef.current !== ws) return;
-
-      clearHeartbeat();
+    socket.on("disconnect", (reason) => {
+      if (!mountedRef.current || socketRef.current !== socket) return;
       setStatus("disconnected");
       setClientId(null);
-      wsRef.current = null;
 
-      if (!event.wasClean && retryCountRef.current < maxRetries) {
-        const baseDelayCurrent = baseDelay * Math.pow(2, retryCountRef.current);
-        const delay = addJitter(Math.min(baseDelayCurrent, 30000));
-        retryCountRef.current++;
-        setRetryCount(retryCountRef.current);
-
-        optionsRef.current.onReconnecting?.(retryCountRef.current, maxRetries);
-
-        retryTimeoutRef.current = setTimeout(() => {
-          connect();
-        }, delay);
-      } else if (retryCountRef.current >= maxRetries) {
-        optionsRef.current.onError?.("Connection failed after max retries");
+      if (reason === "io server disconnect") {
+        socket.connect();
       }
-    };
-  }, [url, handleMessage, maxRetries, baseDelay, clearHeartbeat, flushMessageQueue, startHeartbeat]);
+    });
+
+    socket.io.on("reconnect_attempt", (attempt) => {
+      if (!mountedRef.current) return;
+      setRetryCount(attempt);
+      optionsRef.current.onReconnecting?.(attempt, maxRetries);
+    });
+
+    socket.io.on("reconnect_failed", () => {
+      if (!mountedRef.current) return;
+      optionsRef.current.onError?.("Connection failed after max retries");
+    });
+
+    socket.io.on("reconnect", () => {
+      if (!mountedRef.current) return;
+      setRetryCount(0);
+    });
+  }, [url, handleMessage, maxRetries, flushMessageQueue]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -301,44 +231,31 @@ export function useWebSocket(
     return () => {
       mountedRef.current = false;
 
-      clearHeartbeat();
-
-      if (retryTimeoutRef.current) {
-        clearTimeout(retryTimeoutRef.current);
-      }
-
-      if (wsRef.current) {
-        const ws = wsRef.current;
-        ws.onopen = null;
-        ws.onmessage = null;
-        ws.onerror = null;
-        ws.onclose = null;
-        ws.close();
-        wsRef.current = null;
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+        socketRef.current = null;
       }
 
       messageQueueRef.current = [];
     };
-  }, [connect, clearHeartbeat]);
+  }, [connect]);
 
   const send = useCallback((message: ClientMessage, queueIfDisconnected: boolean = false): boolean => {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+    if (!socketRef.current || !socketRef.current.connected) {
       if (queueIfDisconnected) {
-        messageQueueRef.current.push({ message, timestamp: Date.now() });
+        messageQueueRef.current.push(message);
         return true;
       }
       return false;
     }
-    wsRef.current.send(JSON.stringify(message));
+    socketRef.current.emit("message", message);
     return true;
   }, []);
 
   const reconnect = useCallback(() => {
-    retryCountRef.current = 0;
     setRetryCount(0);
-    if (retryTimeoutRef.current) {
-      clearTimeout(retryTimeoutRef.current);
-      retryTimeoutRef.current = null;
+    if (socketRef.current) {
+      socketRef.current.disconnect();
     }
     connect();
   }, [connect]);
@@ -384,8 +301,8 @@ export function useWebSocket(
   }, [send]);
 
   const switchMode = useCallback(
-    (mode: "chat" | "terminal", cols?: number, rows?: number): boolean => {
-      return send({ type: "mode.switch", mode, cols, rows });
+    (mode: "chat" | "terminal", cols?: number, rows?: number, dangerouslySkipPermissions?: boolean): boolean => {
+      return send({ type: "mode.switch", mode, cols, rows, dangerouslySkipPermissions });
     },
     [send]
   );

@@ -2,119 +2,144 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { renderHook, act, waitFor } from "@testing-library/react";
+import { renderHook, act } from "@testing-library/react";
 import { useWebSocket, type ServerMessage } from "./use-websocket";
 
-class MockWebSocket {
-  static instances: MockWebSocket[] = [];
-  static CONNECTING = 0;
-  static OPEN = 1;
-  static CLOSING = 2;
-  static CLOSED = 3;
+interface MockManager {
+  on: ReturnType<typeof vi.fn>;
+}
 
-  url: string;
-  readyState: number = MockWebSocket.CONNECTING;
-  onopen: (() => void) | null = null;
-  onclose: ((event: { wasClean: boolean; code: number }) => void) | null = null;
-  onerror: ((event: Event) => void) | null = null;
-  onmessage: ((event: { data: string }) => void) | null = null;
+class MockSocket {
+  static instances: MockSocket[] = [];
 
-  private closed = false;
+  connected = false;
+  id: string | null = null;
+  private eventHandlers = new Map<string, Set<(data: unknown) => void>>();
 
-  constructor(url: string) {
-    this.url = url;
-    MockWebSocket.instances.push(this);
+  io: MockManager = {
+    on: vi.fn((event: string, handler: (data: unknown) => void) => {
+      if (!this.managerEventHandlers.has(event)) {
+        this.managerEventHandlers.set(event, new Set());
+      }
+      this.managerEventHandlers.get(event)!.add(handler);
+    }),
+  };
+
+  private managerEventHandlers = new Map<string, Set<(data: unknown) => void>>();
+
+  emit = vi.fn();
+  disconnect = vi.fn(() => {
+    this.connected = false;
+  });
+  connect = vi.fn();
+
+  constructor() {
+    MockSocket.instances.push(this);
   }
 
-  send = vi.fn();
-
-  close() {
-    if (this.closed) return;
-    this.closed = true;
-    this.readyState = MockWebSocket.CLOSED;
-    this.onclose?.({ wasClean: true, code: 1000 });
+  on(event: string, handler: (data: unknown) => void): this {
+    if (!this.eventHandlers.has(event)) {
+      this.eventHandlers.set(event, new Set());
+    }
+    this.eventHandlers.get(event)!.add(handler);
+    return this;
   }
 
-  simulateOpen() {
-    this.readyState = MockWebSocket.OPEN;
-    this.onopen?.();
+  simulateConnect() {
+    this.connected = true;
+    this.id = "socket-id";
+    const handlers = this.eventHandlers.get("connect");
+    handlers?.forEach((h) => h(undefined));
   }
 
   simulateMessage(data: ServerMessage) {
-    this.onmessage?.({ data: JSON.stringify(data) });
+    const handlers = this.eventHandlers.get("message");
+    handlers?.forEach((h) => h(data));
   }
 
-  simulateError() {
-    this.onerror?.(new Event("error"));
+  simulateConnectError(error: Error) {
+    const handlers = this.eventHandlers.get("connect_error");
+    handlers?.forEach((h) => h(error));
   }
 
-  simulateClose(wasClean = true) {
-    if (this.closed) return;
-    this.closed = true;
-    this.readyState = MockWebSocket.CLOSED;
-    this.onclose?.({ wasClean, code: wasClean ? 1000 : 1006 });
+  simulateDisconnect(reason: string) {
+    this.connected = false;
+    const handlers = this.eventHandlers.get("disconnect");
+    handlers?.forEach((h) => h(reason));
   }
 
-  simulateUncleanClose() {
-    this.simulateClose(false);
+  simulateReconnectAttempt(attempt: number) {
+    const handlers = this.managerEventHandlers.get("reconnect_attempt");
+    handlers?.forEach((h) => h(attempt));
+  }
+
+  simulateReconnectFailed() {
+    const handlers = this.managerEventHandlers.get("reconnect_failed");
+    handlers?.forEach((h) => h(undefined));
+  }
+
+  simulateReconnect() {
+    const handlers = this.managerEventHandlers.get("reconnect");
+    handlers?.forEach((h) => h(undefined));
   }
 }
 
-describe("useWebSocket", () => {
-  let originalWebSocket: typeof WebSocket;
+const mockIo = vi.fn(() => new MockSocket());
 
+vi.mock("socket.io-client", () => ({
+  io: (url: string, options: unknown) => mockIo(url, options),
+}));
+
+describe("useWebSocket", () => {
   beforeEach(() => {
-    vi.useFakeTimers();
-    MockWebSocket.instances = [];
-    originalWebSocket = globalThis.WebSocket;
-    globalThis.WebSocket = MockWebSocket as unknown as typeof WebSocket;
+    MockSocket.instances = [];
+    mockIo.mockClear();
   });
 
   afterEach(() => {
-    vi.useRealTimers();
-    globalThis.WebSocket = originalWebSocket;
+    vi.clearAllMocks();
   });
 
-  function getLatestWebSocket(): MockWebSocket {
-    return MockWebSocket.instances[MockWebSocket.instances.length - 1];
+  function getLatestSocket(): MockSocket {
+    return MockSocket.instances[MockSocket.instances.length - 1];
   }
 
   describe("connection", () => {
     it("starts with disconnected status", () => {
-      const { result } = renderHook(() => useWebSocket("ws://localhost:12001/ws"));
+      const { result } = renderHook(() => useWebSocket("http://localhost:12001"));
       expect(result.current.status).toBe("connecting");
     });
 
-    it("transitions to connected when WebSocket opens", async () => {
-      const { result } = renderHook(() => useWebSocket("ws://localhost:12001/ws"));
+    it("transitions to connected when socket connects", async () => {
+      const { result } = renderHook(() => useWebSocket("http://localhost:12001"));
 
       act(() => {
-        getLatestWebSocket().simulateOpen();
+        getLatestSocket().simulateConnect();
       });
 
       expect(result.current.status).toBe("connected");
     });
 
-    it("transitions to disconnected when WebSocket closes", async () => {
-      const { result } = renderHook(() => useWebSocket("ws://localhost:12001/ws"));
+    it("transitions to disconnected when socket disconnects", async () => {
+      const { result } = renderHook(() => useWebSocket("http://localhost:12001"));
 
       act(() => {
-        getLatestWebSocket().simulateOpen();
+        getLatestSocket().simulateConnect();
       });
 
       act(() => {
-        getLatestWebSocket().simulateClose();
+        getLatestSocket().simulateDisconnect("transport close");
       });
 
       expect(result.current.status).toBe("disconnected");
     });
 
     it("sets clientId from connected message", async () => {
-      const { result } = renderHook(() => useWebSocket("ws://localhost:12001/ws"));
+      const { result } = renderHook(() => useWebSocket("http://localhost:12001"));
 
       act(() => {
-        getLatestWebSocket().simulateOpen();
-        getLatestWebSocket().simulateMessage({
+        getLatestSocket().simulateConnect();
+        getLatestSocket().simulateMessage({
           type: "connected",
           clientId: "client-123",
         });
@@ -124,226 +149,95 @@ describe("useWebSocket", () => {
     });
 
     it("clears clientId on disconnect", async () => {
-      const { result } = renderHook(() => useWebSocket("ws://localhost:12001/ws"));
+      const { result } = renderHook(() => useWebSocket("http://localhost:12001"));
 
       act(() => {
-        getLatestWebSocket().simulateOpen();
-        getLatestWebSocket().simulateMessage({
+        getLatestSocket().simulateConnect();
+        getLatestSocket().simulateMessage({
           type: "connected",
           clientId: "client-123",
         });
       });
 
       act(() => {
-        getLatestWebSocket().simulateClose();
+        getLatestSocket().simulateDisconnect("transport close");
       });
 
       expect(result.current.clientId).toBeNull();
     });
 
-    it("attempts reconnection with exponential backoff on unclean close", async () => {
-      const { result } = renderHook(() =>
-        useWebSocket("ws://localhost:12001/ws", { baseDelay: 1000 })
-      );
-
-      act(() => {
-        getLatestWebSocket().simulateOpen();
-      });
-
-      act(() => {
-        getLatestWebSocket().simulateUncleanClose();
-      });
-
-      expect(MockWebSocket.instances).toHaveLength(1);
-
-      act(() => {
-        vi.advanceTimersByTime(1500);
-      });
-
-      expect(MockWebSocket.instances).toHaveLength(2);
-
-      act(() => {
-        getLatestWebSocket().simulateUncleanClose();
-      });
-
-      act(() => {
-        vi.advanceTimersByTime(3000);
-      });
-
-      expect(MockWebSocket.instances).toHaveLength(3);
-    });
-
-    it("does not reconnect on clean close", async () => {
-      renderHook(() =>
-        useWebSocket("ws://localhost:12001/ws", { baseDelay: 100 })
-      );
-
-      act(() => {
-        getLatestWebSocket().simulateOpen();
-      });
-
-      act(() => {
-        getLatestWebSocket().simulateClose(true);
-      });
-
-      act(() => {
-        vi.advanceTimersByTime(1000);
-      });
-
-      expect(MockWebSocket.instances).toHaveLength(1);
-    });
-
-    it("stops reconnecting after max retries", async () => {
-      const onError = vi.fn();
-      renderHook(() =>
-        useWebSocket("ws://localhost:12001/ws", {
-          maxRetries: 2,
-          baseDelay: 100,
-          onError,
-        })
-      );
-
-      act(() => {
-        getLatestWebSocket().simulateUncleanClose();
-      });
-
-      act(() => {
-        vi.advanceTimersByTime(200);
-      });
-
-      act(() => {
-        getLatestWebSocket().simulateUncleanClose();
-      });
-
-      act(() => {
-        vi.advanceTimersByTime(400);
-      });
-
-      act(() => {
-        getLatestWebSocket().simulateUncleanClose();
-      });
-
-      expect(onError).toHaveBeenCalledWith("Connection failed after max retries");
-    });
-
-    it("resets retry count on successful connection", async () => {
-      renderHook(() =>
-        useWebSocket("ws://localhost:12001/ws", { baseDelay: 100, maxRetries: 3 })
-      );
-
-      act(() => {
-        getLatestWebSocket().simulateUncleanClose();
-      });
-
-      act(() => {
-        vi.advanceTimersByTime(200);
-      });
-
-      act(() => {
-        getLatestWebSocket().simulateOpen();
-      });
-
-      act(() => {
-        getLatestWebSocket().simulateUncleanClose();
-      });
-
-      act(() => {
-        vi.advanceTimersByTime(200);
-      });
-
-      expect(MockWebSocket.instances).toHaveLength(3);
-    });
-
-    it("calls onReconnecting callback with retry count", async () => {
+    it("updates retryCount on reconnect attempt", async () => {
       const onReconnecting = vi.fn();
-      renderHook(() =>
-        useWebSocket("ws://localhost:12001/ws", {
-          baseDelay: 100,
+      const { result } = renderHook(() =>
+        useWebSocket("http://localhost:12001", {
           maxRetries: 5,
           onReconnecting,
         })
       );
 
       act(() => {
-        getLatestWebSocket().simulateUncleanClose();
-      });
-
-      act(() => {
-        vi.advanceTimersByTime(200);
-      });
-
-      expect(onReconnecting).toHaveBeenCalledWith(1, 5);
-
-      act(() => {
-        getLatestWebSocket().simulateUncleanClose();
-      });
-
-      act(() => {
-        vi.advanceTimersByTime(400);
-      });
-
-      expect(onReconnecting).toHaveBeenCalledWith(2, 5);
-    });
-
-    it("exposes retryCount state", async () => {
-      const { result } = renderHook(() =>
-        useWebSocket("ws://localhost:12001/ws", { baseDelay: 100 })
-      );
-
-      expect(result.current.retryCount).toBe(0);
-
-      act(() => {
-        getLatestWebSocket().simulateUncleanClose();
-      });
-
-      act(() => {
-        vi.advanceTimersByTime(200);
+        getLatestSocket().simulateReconnectAttempt(1);
       });
 
       expect(result.current.retryCount).toBe(1);
+      expect(onReconnecting).toHaveBeenCalledWith(1, 5);
     });
 
-    it("reconnect() resets retry count and reconnects", async () => {
-      const { result } = renderHook(() =>
-        useWebSocket("ws://localhost:12001/ws", { baseDelay: 100, maxRetries: 2 })
+    it("calls onError on reconnect failure", async () => {
+      const onError = vi.fn();
+      renderHook(() =>
+        useWebSocket("http://localhost:12001", { onError })
       );
 
       act(() => {
-        getLatestWebSocket().simulateUncleanClose();
+        getLatestSocket().simulateReconnectFailed();
       });
 
-      act(() => {
-        vi.advanceTimersByTime(200);
-      });
+      expect(onError).toHaveBeenCalledWith("Connection failed after max retries");
+    });
+
+    it("resets retry count on successful reconnect", async () => {
+      const { result } = renderHook(() => useWebSocket("http://localhost:12001"));
 
       act(() => {
-        getLatestWebSocket().simulateUncleanClose();
+        getLatestSocket().simulateReconnectAttempt(3);
       });
 
+      expect(result.current.retryCount).toBe(3);
+
       act(() => {
-        vi.advanceTimersByTime(400);
+        getLatestSocket().simulateReconnect();
+      });
+
+      expect(result.current.retryCount).toBe(0);
+    });
+
+    it("reconnect() resets retry count and reconnects", async () => {
+      const { result } = renderHook(() => useWebSocket("http://localhost:12001"));
+
+      act(() => {
+        getLatestSocket().simulateReconnectAttempt(2);
       });
 
       expect(result.current.retryCount).toBe(2);
-      const instanceCountBefore = MockWebSocket.instances.length;
+      const instanceCountBefore = MockSocket.instances.length;
 
       act(() => {
         result.current.reconnect();
       });
 
       expect(result.current.retryCount).toBe(0);
-      expect(MockWebSocket.instances.length).toBe(instanceCountBefore + 1);
+      expect(MockSocket.instances.length).toBe(instanceCountBefore + 1);
     });
 
     it("cleans up on unmount", async () => {
-      const { unmount } = renderHook(() => useWebSocket("ws://localhost:12001/ws"));
+      const { unmount } = renderHook(() => useWebSocket("http://localhost:12001"));
 
-      const ws = getLatestWebSocket();
-      const closeSpy = vi.spyOn(ws, "close");
+      const socket = getLatestSocket();
 
       unmount();
 
-      expect(closeSpy).toHaveBeenCalled();
+      expect(socket.disconnect).toHaveBeenCalled();
     });
   });
 
@@ -351,12 +245,12 @@ describe("useWebSocket", () => {
     it("calls onMessage for all messages", async () => {
       const onMessage = vi.fn();
       renderHook(() =>
-        useWebSocket("ws://localhost:12001/ws", { onMessage })
+        useWebSocket("http://localhost:12001", { onMessage })
       );
 
       act(() => {
-        getLatestWebSocket().simulateOpen();
-        getLatestWebSocket().simulateMessage({
+        getLatestSocket().simulateConnect();
+        getLatestSocket().simulateMessage({
           type: "session.started",
           sessionId: "session-123",
         });
@@ -371,12 +265,12 @@ describe("useWebSocket", () => {
     it("calls onSessionStarted and sets activeSessionId", async () => {
       const onSessionStarted = vi.fn();
       const { result } = renderHook(() =>
-        useWebSocket("ws://localhost:12001/ws", { onSessionStarted })
+        useWebSocket("http://localhost:12001", { onSessionStarted })
       );
 
       act(() => {
-        getLatestWebSocket().simulateOpen();
-        getLatestWebSocket().simulateMessage({
+        getLatestSocket().simulateConnect();
+        getLatestSocket().simulateMessage({
           type: "session.started",
           sessionId: "session-456",
         });
@@ -389,12 +283,12 @@ describe("useWebSocket", () => {
     it("calls onAssistantChunk with content", async () => {
       const onAssistantChunk = vi.fn();
       renderHook(() =>
-        useWebSocket("ws://localhost:12001/ws", { onAssistantChunk })
+        useWebSocket("http://localhost:12001", { onAssistantChunk })
       );
 
       act(() => {
-        getLatestWebSocket().simulateOpen();
-        getLatestWebSocket().simulateMessage({
+        getLatestSocket().simulateConnect();
+        getLatestSocket().simulateMessage({
           type: "assistant.chunk",
           content: "Hello, world!",
         });
@@ -406,12 +300,12 @@ describe("useWebSocket", () => {
     it("calls onTerminalOutput with data", async () => {
       const onTerminalOutput = vi.fn();
       renderHook(() =>
-        useWebSocket("ws://localhost:12001/ws", { onTerminalOutput })
+        useWebSocket("http://localhost:12001", { onTerminalOutput })
       );
 
       act(() => {
-        getLatestWebSocket().simulateOpen();
-        getLatestWebSocket().simulateMessage({
+        getLatestSocket().simulateConnect();
+        getLatestSocket().simulateMessage({
           type: "terminal.output",
           data: "$ ls\nfile.txt",
         });
@@ -423,19 +317,19 @@ describe("useWebSocket", () => {
     it("calls onSessionEnded and clears activeSessionId", async () => {
       const onSessionEnded = vi.fn();
       const { result } = renderHook(() =>
-        useWebSocket("ws://localhost:12001/ws", { onSessionEnded })
+        useWebSocket("http://localhost:12001", { onSessionEnded })
       );
 
       act(() => {
-        getLatestWebSocket().simulateOpen();
-        getLatestWebSocket().simulateMessage({
+        getLatestSocket().simulateConnect();
+        getLatestSocket().simulateMessage({
           type: "session.started",
           sessionId: "session-789",
         });
       });
 
       act(() => {
-        getLatestWebSocket().simulateMessage({
+        getLatestSocket().simulateMessage({
           type: "session.ended",
           reason: "User closed session",
         });
@@ -448,12 +342,12 @@ describe("useWebSocket", () => {
     it("calls onError for error messages", async () => {
       const onError = vi.fn();
       renderHook(() =>
-        useWebSocket("ws://localhost:12001/ws", { onError })
+        useWebSocket("http://localhost:12001", { onError })
       );
 
       act(() => {
-        getLatestWebSocket().simulateOpen();
-        getLatestWebSocket().simulateMessage({
+        getLatestSocket().simulateConnect();
+        getLatestSocket().simulateMessage({
           type: "error",
           message: "Something went wrong",
         });
@@ -462,43 +356,28 @@ describe("useWebSocket", () => {
       expect(onError).toHaveBeenCalledWith("Something went wrong");
     });
 
-    it("calls onError for invalid JSON messages", async () => {
+    it("calls onError for connect errors", async () => {
       const onError = vi.fn();
       renderHook(() =>
-        useWebSocket("ws://localhost:12001/ws", { onError })
+        useWebSocket("http://localhost:12001", { onError })
       );
 
       act(() => {
-        getLatestWebSocket().simulateOpen();
-        getLatestWebSocket().onmessage?.({ data: "not json" });
+        getLatestSocket().simulateConnectError(new Error("Connection refused"));
       });
 
-      expect(onError).toHaveBeenCalledWith("Invalid message from server");
-    });
-
-    it("handles pong messages and updates lastPong", async () => {
-      const onMessage = vi.fn();
-      renderHook(() =>
-        useWebSocket("ws://localhost:12001/ws", { onMessage })
-      );
-
-      act(() => {
-        getLatestWebSocket().simulateOpen();
-        getLatestWebSocket().simulateMessage({ type: "pong" });
-      });
-
-      expect(onMessage).toHaveBeenCalledWith({ type: "pong" });
+      expect(onError).toHaveBeenCalledWith("Connection refused");
     });
 
     it("handles session.control messages", async () => {
       const onSessionControl = vi.fn();
       const { result } = renderHook(() =>
-        useWebSocket("ws://localhost:12001/ws", { onSessionControl })
+        useWebSocket("http://localhost:12001", { onSessionControl })
       );
 
       act(() => {
-        getLatestWebSocket().simulateOpen();
-        getLatestWebSocket().simulateMessage({
+        getLatestSocket().simulateConnect();
+        getLatestSocket().simulateMessage({
           type: "session.control",
           hasControl: true,
         });
@@ -510,12 +389,12 @@ describe("useWebSocket", () => {
 
     it("clears hasControl when session ends", async () => {
       const { result } = renderHook(() =>
-        useWebSocket("ws://localhost:12001/ws")
+        useWebSocket("http://localhost:12001")
       );
 
       act(() => {
-        getLatestWebSocket().simulateOpen();
-        getLatestWebSocket().simulateMessage({
+        getLatestSocket().simulateConnect();
+        getLatestSocket().simulateMessage({
           type: "session.control",
           hasControl: true,
         });
@@ -524,7 +403,7 @@ describe("useWebSocket", () => {
       expect(result.current.hasControl).toBe(true);
 
       act(() => {
-        getLatestWebSocket().simulateMessage({
+        getLatestSocket().simulateMessage({
           type: "session.ended",
           reason: "Session closed",
         });
@@ -536,185 +415,160 @@ describe("useWebSocket", () => {
 
   describe("sending messages", () => {
     it("send returns false when not connected", () => {
-      const { result } = renderHook(() => useWebSocket("ws://localhost:12001/ws"));
+      const { result } = renderHook(() => useWebSocket("http://localhost:12001"));
 
       expect(result.current.send({ type: "message.send", content: "test" })).toBe(false);
     });
 
     it("send returns true and sends message when connected", async () => {
-      const { result } = renderHook(() => useWebSocket("ws://localhost:12001/ws"));
+      const { result } = renderHook(() => useWebSocket("http://localhost:12001"));
 
       act(() => {
-        getLatestWebSocket().simulateOpen();
+        getLatestSocket().simulateConnect();
       });
 
       const success = result.current.send({ type: "message.send", content: "test" });
 
       expect(success).toBe(true);
-      expect(getLatestWebSocket().send).toHaveBeenCalledWith(
-        JSON.stringify({ type: "message.send", content: "test" })
+      expect(getLatestSocket().emit).toHaveBeenCalledWith(
+        "message",
+        { type: "message.send", content: "test" }
       );
     });
 
     it("startSession sends session.start message", async () => {
-      const { result } = renderHook(() => useWebSocket("ws://localhost:12001/ws"));
+      const { result } = renderHook(() => useWebSocket("http://localhost:12001"));
 
       act(() => {
-        getLatestWebSocket().simulateOpen();
+        getLatestSocket().simulateConnect();
       });
 
       result.current.startSession("my-session", "/path/to/project");
 
-      expect(getLatestWebSocket().send).toHaveBeenCalledWith(
-        JSON.stringify({
+      expect(getLatestSocket().emit).toHaveBeenCalledWith(
+        "message",
+        {
           type: "session.start",
           sessionId: "my-session",
           projectPath: "/path/to/project",
-        })
+          mode: undefined,
+          cols: undefined,
+          rows: undefined,
+          dangerouslySkipPermissions: undefined,
+        }
       );
     });
 
     it("startSession works without sessionId or projectPath", async () => {
-      const { result } = renderHook(() => useWebSocket("ws://localhost:12001/ws"));
+      const { result } = renderHook(() => useWebSocket("http://localhost:12001"));
 
       act(() => {
-        getLatestWebSocket().simulateOpen();
+        getLatestSocket().simulateConnect();
       });
 
       result.current.startSession();
 
-      expect(getLatestWebSocket().send).toHaveBeenCalledWith(
-        JSON.stringify({
+      expect(getLatestSocket().emit).toHaveBeenCalledWith(
+        "message",
+        {
           type: "session.start",
           sessionId: undefined,
           projectPath: undefined,
-        })
+          mode: undefined,
+          cols: undefined,
+          rows: undefined,
+          dangerouslySkipPermissions: undefined,
+        }
       );
     });
 
     it("sendMessage sends message.send with content", async () => {
-      const { result } = renderHook(() => useWebSocket("ws://localhost:12001/ws"));
+      const { result } = renderHook(() => useWebSocket("http://localhost:12001"));
 
       act(() => {
-        getLatestWebSocket().simulateOpen();
+        getLatestSocket().simulateConnect();
       });
 
       result.current.sendMessage("Hello, Claude!");
 
-      expect(getLatestWebSocket().send).toHaveBeenCalledWith(
-        JSON.stringify({ type: "message.send", content: "Hello, Claude!" })
+      expect(getLatestSocket().emit).toHaveBeenCalledWith(
+        "message",
+        { type: "message.send", content: "Hello, Claude!" }
       );
     });
 
     it("interrupt sends session.interrupt message", async () => {
-      const { result } = renderHook(() => useWebSocket("ws://localhost:12001/ws"));
+      const { result } = renderHook(() => useWebSocket("http://localhost:12001"));
 
       act(() => {
-        getLatestWebSocket().simulateOpen();
+        getLatestSocket().simulateConnect();
       });
 
       result.current.interrupt();
 
-      expect(getLatestWebSocket().send).toHaveBeenCalledWith(
-        JSON.stringify({ type: "session.interrupt" })
+      expect(getLatestSocket().emit).toHaveBeenCalledWith(
+        "message",
+        { type: "session.interrupt" }
       );
     });
 
     it("closeSession sends session.close message", async () => {
-      const { result } = renderHook(() => useWebSocket("ws://localhost:12001/ws"));
+      const { result } = renderHook(() => useWebSocket("http://localhost:12001"));
 
       act(() => {
-        getLatestWebSocket().simulateOpen();
+        getLatestSocket().simulateConnect();
       });
 
       result.current.closeSession();
 
-      expect(getLatestWebSocket().send).toHaveBeenCalledWith(
-        JSON.stringify({ type: "session.close" })
+      expect(getLatestSocket().emit).toHaveBeenCalledWith(
+        "message",
+        { type: "session.close" }
       );
     });
 
     it("switchMode sends mode.switch message", async () => {
-      const { result } = renderHook(() => useWebSocket("ws://localhost:12001/ws"));
+      const { result } = renderHook(() => useWebSocket("http://localhost:12001"));
 
       act(() => {
-        getLatestWebSocket().simulateOpen();
+        getLatestSocket().simulateConnect();
       });
 
       result.current.switchMode("terminal");
 
-      expect(getLatestWebSocket().send).toHaveBeenCalledWith(
-        JSON.stringify({ type: "mode.switch", mode: "terminal" })
+      expect(getLatestSocket().emit).toHaveBeenCalledWith(
+        "message",
+        { type: "mode.switch", mode: "terminal", cols: undefined, rows: undefined, dangerouslySkipPermissions: undefined }
       );
     });
 
     it("queues messages when disconnected if queueIfDisconnected is true", async () => {
-      const { result } = renderHook(() => useWebSocket("ws://localhost:12001/ws"));
+      const { result } = renderHook(() => useWebSocket("http://localhost:12001"));
 
       const sent = result.current.send({ type: "message.send", content: "queued" }, true);
 
       expect(sent).toBe(true);
-      expect(getLatestWebSocket().send).not.toHaveBeenCalled();
+      expect(getLatestSocket().emit).not.toHaveBeenCalledWith(
+        "message",
+        { type: "message.send", content: "queued" }
+      );
 
       act(() => {
-        getLatestWebSocket().simulateOpen();
+        getLatestSocket().simulateConnect();
       });
 
-      expect(getLatestWebSocket().send).toHaveBeenCalledWith(
-        JSON.stringify({ type: "message.send", content: "queued" })
+      expect(getLatestSocket().emit).toHaveBeenCalledWith(
+        "message",
+        { type: "message.send", content: "queued" }
       );
     });
 
     it("does not queue messages by default when disconnected", () => {
-      const { result } = renderHook(() => useWebSocket("ws://localhost:12001/ws"));
+      const { result } = renderHook(() => useWebSocket("http://localhost:12001"));
 
       const sent = result.current.send({ type: "message.send", content: "test" });
 
       expect(sent).toBe(false);
-    });
-  });
-
-  describe("heartbeat", () => {
-    it("sends ping messages at heartbeat interval", async () => {
-      renderHook(() =>
-        useWebSocket("ws://localhost:12001/ws", { heartbeatInterval: 1000 })
-      );
-
-      act(() => {
-        getLatestWebSocket().simulateOpen();
-      });
-
-      expect(getLatestWebSocket().send).not.toHaveBeenCalledWith(
-        JSON.stringify({ type: "ping" })
-      );
-
-      act(() => {
-        vi.advanceTimersByTime(1000);
-      });
-
-      expect(getLatestWebSocket().send).toHaveBeenCalledWith(
-        JSON.stringify({ type: "ping" })
-      );
-    });
-
-    it("clears heartbeat interval on unmount", async () => {
-      const { unmount } = renderHook(() =>
-        useWebSocket("ws://localhost:12001/ws", { heartbeatInterval: 1000 })
-      );
-
-      act(() => {
-        getLatestWebSocket().simulateOpen();
-      });
-
-      unmount();
-
-      act(() => {
-        vi.advanceTimersByTime(2000);
-      });
-
-      expect(getLatestWebSocket().send).not.toHaveBeenCalledWith(
-        JSON.stringify({ type: "ping" })
-      );
     });
   });
 });

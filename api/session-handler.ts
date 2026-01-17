@@ -35,6 +35,7 @@ interface ClientSession {
   sessionId?: string;
   status: SessionStatus;
   endReason?: string;
+  dangerouslySkipPermissions?: boolean;
 }
 
 const clientSessions = new Map<string, ClientSession>();
@@ -254,6 +255,7 @@ function handleSessionStart(clientId: string, message: ClientMessage): void {
       ptyId: ptyInfo.id,
       sessionId: message.sessionId,
       status: "active",
+      dangerouslySkipPermissions: message.dangerouslySkipPermissions,
     });
     ptyClients.set(ptyInfo.id, clientId);
 
@@ -287,6 +289,7 @@ function handleSessionStart(clientId: string, message: ClientMessage): void {
       processId: processInfo.id,
       sessionId: message.sessionId,
       status: "active",
+      dangerouslySkipPermissions: message.dangerouslySkipPermissions,
     });
     processClients.set(processInfo.id, clientId);
 
@@ -420,6 +423,7 @@ function handleModeSwitch(clientId: string, message: ClientMessage): void {
     : clientSession.ptyId
       ? undefined
       : undefined;
+  const dangerouslySkipPermissions = clientSession.dangerouslySkipPermissions;
 
   if (clientSession.processId) {
     killProcess(clientSession.processId);
@@ -439,6 +443,7 @@ function handleModeSwitch(clientId: string, message: ClientMessage): void {
     mode: newMode,
     cols: message.cols,
     rows: message.rows,
+    dangerouslySkipPermissions,
   });
 }
 

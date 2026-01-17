@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createServer } from "http";
-import { WebSocket } from "ws";
+import { io as ioClient, Socket as ClientSocket } from "socket.io-client";
 import {
   initWebSocket,
   stopWebSocket,
@@ -35,7 +35,7 @@ vi.mock("./process-manager", () => {
       processes.set(id, info);
       return info;
     }),
-    sendToProcess: vi.fn((processId: string, message: string) => {
+    sendToProcess: vi.fn((processId: string, _message: string) => {
       return processes.has(processId);
     }),
     interruptProcess: vi.fn((processId: string) => {
@@ -79,29 +79,47 @@ const mockProcessManager = processManager as unknown as {
   __getProcesses: () => Map<string, { id: string; sessionId?: string }>;
 };
 
-function waitForOpen(ws: WebSocket): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (ws.readyState === WebSocket.OPEN) {
-      resolve();
-      return;
-    }
-    ws.once("open", resolve);
-    ws.once("error", reject);
+function createClientSocket(port: number): ClientSocket {
+  return ioClient(`http://localhost:${port}`, {
+    path: "/socket.io",
+    transports: ["websocket"],
+    autoConnect: true,
+    reconnection: false,
   });
 }
 
-function waitForMessage(ws: WebSocket): Promise<unknown> {
-  return new Promise((resolve) => {
-    ws.once("message", (data) => {
-      resolve(JSON.parse(data.toString()));
+function waitForConnect(socket: ClientSocket): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (socket.connected) {
+      resolve();
+      return;
+    }
+    const timeout = setTimeout(() => reject(new Error("Connection timeout")), 5000);
+    socket.once("connect", () => {
+      clearTimeout(timeout);
+      resolve();
+    });
+    socket.once("connect_error", (err) => {
+      clearTimeout(timeout);
+      reject(err);
     });
   });
 }
 
-function collectMessages(ws: WebSocket): unknown[] {
+function waitForMessage(socket: ClientSocket): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error("Message timeout")), 5000);
+    socket.once("message", (data) => {
+      clearTimeout(timeout);
+      resolve(data);
+    });
+  });
+}
+
+function collectMessages(socket: ClientSocket): unknown[] {
   const messages: unknown[] = [];
-  ws.on("message", (data) => {
-    messages.push(JSON.parse(data.toString()));
+  socket.on("message", (data) => {
+    messages.push(data);
   });
   return messages;
 }
@@ -135,12 +153,12 @@ describe("Session Handler - Message Round-Trip", () => {
 
   describe("session.start", () => {
     it("should spawn a Claude process and return session.started", async () => {
-      const ws = new WebSocket(`ws://localhost:${port}/ws`);
-      await waitForMessage(ws);
+      const socket = createClientSocket(port);
+      await waitForMessage(socket);
 
-      const messages = collectMessages(ws);
+      const messages = collectMessages(socket);
 
-      ws.send(JSON.stringify({ type: "session.start" }));
+      socket.emit("message", { type: "session.start" });
       await new Promise((r) => setTimeout(r, 50));
 
       expect(mockProcessManager.spawnClaudeProcess).toHaveBeenCalledTimes(1);
@@ -150,48 +168,50 @@ describe("Session Handler - Message Round-Trip", () => {
       );
       expect(startedMsg).toBeDefined();
 
-      ws.close();
+      socket.disconnect();
     });
 
     it("should pass sessionId to spawnClaudeProcess for resume", async () => {
-      const ws = new WebSocket(`ws://localhost:${port}/ws`);
-      await waitForMessage(ws);
+      const socket = createClientSocket(port);
+      await waitForMessage(socket);
 
-      ws.send(JSON.stringify({ type: "session.start", sessionId: "test-session-123" }));
+      socket.emit("message", { type: "session.start", sessionId: "test-session-123" });
       await new Promise((r) => setTimeout(r, 50));
 
       expect(mockProcessManager.spawnClaudeProcess).toHaveBeenCalledWith({
         sessionId: "test-session-123",
         projectPath: undefined,
+        dangerouslySkipPermissions: undefined,
       });
 
-      ws.close();
+      socket.disconnect();
     });
 
     it("should pass projectPath to spawnClaudeProcess", async () => {
-      const ws = new WebSocket(`ws://localhost:${port}/ws`);
-      await waitForMessage(ws);
+      const socket = createClientSocket(port);
+      await waitForMessage(socket);
 
-      ws.send(JSON.stringify({
+      socket.emit("message", {
         type: "session.start",
         projectPath: "/path/to/project",
-      }));
+      });
       await new Promise((r) => setTimeout(r, 50));
 
       expect(mockProcessManager.spawnClaudeProcess).toHaveBeenCalledWith({
         sessionId: undefined,
         projectPath: "/path/to/project",
+        dangerouslySkipPermissions: undefined,
       });
 
-      ws.close();
+      socket.disconnect();
     });
 
     it("should track client-process association", async () => {
-      const ws = new WebSocket(`ws://localhost:${port}/ws`);
-      await waitForMessage(ws);
+      const socket = createClientSocket(port);
+      await waitForMessage(socket);
       const clientId = getConnectedClients()[0];
 
-      ws.send(JSON.stringify({ type: "session.start" }));
+      socket.emit("message", { type: "session.start" });
       await new Promise((r) => setTimeout(r, 50));
 
       const processId = getClientProcessId(clientId);
@@ -200,20 +220,20 @@ describe("Session Handler - Message Round-Trip", () => {
 
       expect(getProcessClientId(processId!)).toBe(clientId);
 
-      ws.close();
+      socket.disconnect();
     });
 
     it("should kill existing process when starting new session", async () => {
-      const ws = new WebSocket(`ws://localhost:${port}/ws`);
-      await waitForMessage(ws);
+      const socket = createClientSocket(port);
+      await waitForMessage(socket);
       const clientId = getConnectedClients()[0];
 
-      ws.send(JSON.stringify({ type: "session.start" }));
+      socket.emit("message", { type: "session.start" });
       await new Promise((r) => setTimeout(r, 50));
 
       const firstProcessId = getClientProcessId(clientId);
 
-      ws.send(JSON.stringify({ type: "session.start" }));
+      socket.emit("message", { type: "session.start" });
       await new Promise((r) => setTimeout(r, 50));
 
       expect(mockProcessManager.killProcess).toHaveBeenCalledWith(firstProcessId);
@@ -221,19 +241,19 @@ describe("Session Handler - Message Round-Trip", () => {
       const secondProcessId = getClientProcessId(clientId);
       expect(secondProcessId).not.toBe(firstProcessId);
 
-      ws.close();
+      socket.disconnect();
     });
   });
 
   describe("message.send", () => {
     it("should send message to process stdin", async () => {
-      const ws = new WebSocket(`ws://localhost:${port}/ws`);
-      await waitForMessage(ws);
+      const socket = createClientSocket(port);
+      await waitForMessage(socket);
 
-      ws.send(JSON.stringify({ type: "session.start" }));
+      socket.emit("message", { type: "session.start" });
       await new Promise((r) => setTimeout(r, 50));
 
-      ws.send(JSON.stringify({ type: "message.send", content: "Hello Claude" }));
+      socket.emit("message", { type: "message.send", content: "Hello Claude" });
       await new Promise((r) => setTimeout(r, 50));
 
       expect(mockProcessManager.sendToProcess).toHaveBeenCalledWith(
@@ -241,16 +261,16 @@ describe("Session Handler - Message Round-Trip", () => {
         JSON.stringify({ type: "user", message: { role: "user", content: "Hello Claude" } })
       );
 
-      ws.close();
+      socket.disconnect();
     });
 
     it("should return error when no session is active", async () => {
-      const ws = new WebSocket(`ws://localhost:${port}/ws`);
-      await waitForMessage(ws);
+      const socket = createClientSocket(port);
+      await waitForMessage(socket);
 
-      const messages = collectMessages(ws);
+      const messages = collectMessages(socket);
 
-      ws.send(JSON.stringify({ type: "message.send", content: "Hello" }));
+      socket.emit("message", { type: "message.send", content: "Hello" });
       await new Promise((r) => setTimeout(r, 50));
 
       const errorMsg = messages.find(
@@ -261,19 +281,19 @@ describe("Session Handler - Message Round-Trip", () => {
         message: "No active session. Start a session first.",
       });
 
-      ws.close();
+      socket.disconnect();
     });
 
     it("should return error when content is missing", async () => {
-      const ws = new WebSocket(`ws://localhost:${port}/ws`);
-      await waitForMessage(ws);
+      const socket = createClientSocket(port);
+      await waitForMessage(socket);
 
-      ws.send(JSON.stringify({ type: "session.start" }));
+      socket.emit("message", { type: "session.start" });
       await new Promise((r) => setTimeout(r, 50));
 
-      const messages = collectMessages(ws);
+      const messages = collectMessages(socket);
 
-      ws.send(JSON.stringify({ type: "message.send" }));
+      socket.emit("message", { type: "message.send" });
       await new Promise((r) => setTimeout(r, 50));
 
       const errorMsg = messages.find(
@@ -284,36 +304,36 @@ describe("Session Handler - Message Round-Trip", () => {
         message: "Message content is required",
       });
 
-      ws.close();
+      socket.disconnect();
     });
   });
 
   describe("session.interrupt", () => {
     it("should send SIGINT to the process", async () => {
-      const ws = new WebSocket(`ws://localhost:${port}/ws`);
-      await waitForMessage(ws);
+      const socket = createClientSocket(port);
+      await waitForMessage(socket);
       const clientId = getConnectedClients()[0];
 
-      ws.send(JSON.stringify({ type: "session.start" }));
+      socket.emit("message", { type: "session.start" });
       await new Promise((r) => setTimeout(r, 50));
 
       const processId = getClientProcessId(clientId);
 
-      ws.send(JSON.stringify({ type: "session.interrupt" }));
+      socket.emit("message", { type: "session.interrupt" });
       await new Promise((r) => setTimeout(r, 50));
 
       expect(mockProcessManager.interruptProcess).toHaveBeenCalledWith(processId);
 
-      ws.close();
+      socket.disconnect();
     });
 
     it("should return error when no session is active", async () => {
-      const ws = new WebSocket(`ws://localhost:${port}/ws`);
-      await waitForMessage(ws);
+      const socket = createClientSocket(port);
+      await waitForMessage(socket);
 
-      const messages = collectMessages(ws);
+      const messages = collectMessages(socket);
 
-      ws.send(JSON.stringify({ type: "session.interrupt" }));
+      socket.emit("message", { type: "session.interrupt" });
       await new Promise((r) => setTimeout(r, 50));
 
       const errorMsg = messages.find(
@@ -324,23 +344,23 @@ describe("Session Handler - Message Round-Trip", () => {
         message: "No active session to interrupt",
       });
 
-      ws.close();
+      socket.disconnect();
     });
   });
 
   describe("session.close", () => {
     it("should kill the process and send session.ended", async () => {
-      const ws = new WebSocket(`ws://localhost:${port}/ws`);
-      await waitForMessage(ws);
+      const socket = createClientSocket(port);
+      await waitForMessage(socket);
       const clientId = getConnectedClients()[0];
 
-      ws.send(JSON.stringify({ type: "session.start" }));
+      socket.emit("message", { type: "session.start" });
       await new Promise((r) => setTimeout(r, 50));
 
       const processId = getClientProcessId(clientId);
-      const messages = collectMessages(ws);
+      const messages = collectMessages(socket);
 
-      ws.send(JSON.stringify({ type: "session.close" }));
+      socket.emit("message", { type: "session.close" });
       await new Promise((r) => setTimeout(r, 50));
 
       expect(mockProcessManager.killProcess).toHaveBeenCalledWith(processId);
@@ -355,21 +375,21 @@ describe("Session Handler - Message Round-Trip", () => {
 
       expect(getClientProcessId(clientId)).toBeUndefined();
 
-      ws.close();
+      socket.disconnect();
     });
   });
 
   describe("process output forwarding", () => {
     it("should forward stdout as assistant.chunk", async () => {
-      const ws = new WebSocket(`ws://localhost:${port}/ws`);
-      await waitForMessage(ws);
+      const socket = createClientSocket(port);
+      await waitForMessage(socket);
       const clientId = getConnectedClients()[0];
 
-      ws.send(JSON.stringify({ type: "session.start" }));
+      socket.emit("message", { type: "session.start" });
       await new Promise((r) => setTimeout(r, 50));
 
       const processId = getClientProcessId(clientId);
-      const messages = collectMessages(ws);
+      const messages = collectMessages(socket);
 
       mockProcessManager.__emitOutput(processId!, {
         type: "stdout",
@@ -385,19 +405,19 @@ describe("Session Handler - Message Round-Trip", () => {
         content: '{"type":"assistant","content":[{"type":"text","text":"Hello!"}]}',
       });
 
-      ws.close();
+      socket.disconnect();
     });
 
     it("should forward process exit as session.ended", async () => {
-      const ws = new WebSocket(`ws://localhost:${port}/ws`);
-      await waitForMessage(ws);
+      const socket = createClientSocket(port);
+      await waitForMessage(socket);
       const clientId = getConnectedClients()[0];
 
-      ws.send(JSON.stringify({ type: "session.start" }));
+      socket.emit("message", { type: "session.start" });
       await new Promise((r) => setTimeout(r, 50));
 
       const processId = getClientProcessId(clientId);
-      const messages = collectMessages(ws);
+      const messages = collectMessages(socket);
 
       mockProcessManager.__emitOutput(processId!, {
         type: "exit",
@@ -415,19 +435,19 @@ describe("Session Handler - Message Round-Trip", () => {
 
       expect(getClientProcessId(clientId)).toBeUndefined();
 
-      ws.close();
+      socket.disconnect();
     });
 
     it("should forward process error as error message", async () => {
-      const ws = new WebSocket(`ws://localhost:${port}/ws`);
-      await waitForMessage(ws);
+      const socket = createClientSocket(port);
+      await waitForMessage(socket);
       const clientId = getConnectedClients()[0];
 
-      ws.send(JSON.stringify({ type: "session.start" }));
+      socket.emit("message", { type: "session.start" });
       await new Promise((r) => setTimeout(r, 50));
 
       const processId = getClientProcessId(clientId);
-      const messages = collectMessages(ws);
+      const messages = collectMessages(socket);
 
       mockProcessManager.__emitOutput(processId!, {
         type: "error",
@@ -443,19 +463,19 @@ describe("Session Handler - Message Round-Trip", () => {
         message: "spawn ENOENT",
       });
 
-      ws.close();
+      socket.disconnect();
     });
   });
 
   describe("full message round-trip", () => {
     it("should complete a full send-receive cycle", async () => {
-      const ws = new WebSocket(`ws://localhost:${port}/ws`);
-      await waitForMessage(ws);
+      const socket = createClientSocket(port);
+      await waitForMessage(socket);
       const clientId = getConnectedClients()[0];
 
-      const messages = collectMessages(ws);
+      const messages = collectMessages(socket);
 
-      ws.send(JSON.stringify({ type: "session.start" }));
+      socket.emit("message", { type: "session.start" });
       await new Promise((r) => setTimeout(r, 50));
 
       const startedMsg = messages.find(
@@ -465,7 +485,7 @@ describe("Session Handler - Message Round-Trip", () => {
 
       const processId = getClientProcessId(clientId);
 
-      ws.send(JSON.stringify({ type: "message.send", content: "What is 2+2?" }));
+      socket.emit("message", { type: "message.send", content: "What is 2+2?" });
       await new Promise((r) => setTimeout(r, 50));
 
       expect(mockProcessManager.sendToProcess).toHaveBeenCalledWith(
@@ -484,7 +504,7 @@ describe("Session Handler - Message Round-Trip", () => {
       );
       expect(chunkMsg).toBeDefined();
 
-      ws.send(JSON.stringify({ type: "session.close" }));
+      socket.emit("message", { type: "session.close" });
       await new Promise((r) => setTimeout(r, 50));
 
       const endedMsg = messages.find(
@@ -494,7 +514,7 @@ describe("Session Handler - Message Round-Trip", () => {
       );
       expect(endedMsg).toBeDefined();
 
-      ws.close();
+      socket.disconnect();
     });
   });
 });

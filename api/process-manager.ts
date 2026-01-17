@@ -1,5 +1,20 @@
-import { spawn, ChildProcess } from "child_process";
+import { spawn, ChildProcess, execSync } from "child_process";
 import { EventEmitter } from "events";
+
+const isWindows = process.platform === "win32";
+
+function findClaudeCommand(): string {
+  if (isWindows) {
+    try {
+      const result = execSync("where claude", { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
+      const firstLine = result.trim().split(/\r?\n/)[0];
+      return firstLine || "claude";
+    } catch {
+      return "claude.cmd";
+    }
+  }
+  return "claude";
+}
 
 export interface ProcessOptions {
   sessionId?: string;
@@ -70,14 +85,17 @@ export function spawnClaudeProcess(options: ProcessOptions = {}): ProcessInfo {
   const processId = generateProcessId();
   const args = buildClaudeArgs(options);
   const cwd = options.projectPath || process.cwd();
+  const claudeCmd = findClaudeCommand();
 
-  const child = spawn("claude", args, {
+  const child = spawn(claudeCmd, args, {
     cwd,
     stdio: ["pipe", "pipe", "pipe"],
     env: {
       ...process.env,
       FORCE_COLOR: "0",
     },
+    shell: isWindows,
+    windowsHide: true,
   });
 
   const processInfo: ProcessInfo = {
@@ -90,6 +108,10 @@ export function spawnClaudeProcess(options: ProcessOptions = {}): ProcessInfo {
   };
 
   processes.set(processId, processInfo);
+
+  child.on("spawn", () => {
+    processInfo.status = "running";
+  });
 
   child.stdout?.on("data", (data: Buffer) => {
     processInfo.status = "running";
@@ -144,7 +166,11 @@ export function interruptProcess(processId: string): boolean {
     return false;
   }
 
-  processInfo.process.kill("SIGINT");
+  if (isWindows) {
+    processInfo.process.stdin?.write("\x03");
+  } else {
+    processInfo.process.kill("SIGINT");
+  }
   return true;
 }
 

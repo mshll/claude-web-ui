@@ -292,7 +292,7 @@ function SessionView(props: SessionViewProps) {
 
       if (activeSessionId) {
         const { cols, rows } = terminalDimensionsRef.current;
-        switchMode(newMode, cols, rows);
+        switchMode(newMode, cols, rows, skipPermissions);
       } else if (newMode === 'terminal' && wsStatus === 'connected') {
         const { cols, rows } = terminalDimensionsRef.current;
         startSession(sessionId, projectPath, 'terminal', cols, rows, skipPermissions);

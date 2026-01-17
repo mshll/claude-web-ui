@@ -1,13 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createServer } from "http";
-import { WebSocket } from "ws";
+import { io as ioClient, Socket as ClientSocket } from "socket.io-client";
 import {
   initWebSocket,
   stopWebSocket,
   getConnectedClients,
   getClientCount,
   broadcast,
-  getWebSocketServer,
+  getSocketIOServer,
   setMessageHandler,
   associateClientWithSession,
   dissociateClientFromSession,
@@ -21,21 +21,39 @@ import {
   type ClientMessage,
 } from "./websocket";
 
-function waitForOpen(ws: WebSocket): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (ws.readyState === WebSocket.OPEN) {
-      resolve();
-      return;
-    }
-    ws.once("open", resolve);
-    ws.once("error", reject);
+function createClientSocket(port: number): ClientSocket {
+  return ioClient(`http://localhost:${port}`, {
+    path: "/socket.io",
+    transports: ["websocket"],
+    autoConnect: true,
+    reconnection: false,
   });
 }
 
-function waitForMessage(ws: WebSocket): Promise<unknown> {
-  return new Promise((resolve) => {
-    ws.once("message", (data) => {
-      resolve(JSON.parse(data.toString()));
+function waitForConnect(socket: ClientSocket): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (socket.connected) {
+      resolve();
+      return;
+    }
+    const timeout = setTimeout(() => reject(new Error("Connection timeout")), 5000);
+    socket.once("connect", () => {
+      clearTimeout(timeout);
+      resolve();
+    });
+    socket.once("connect_error", (err) => {
+      clearTimeout(timeout);
+      reject(err);
+    });
+  });
+}
+
+function waitForMessage(socket: ClientSocket): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error("Message timeout")), 5000);
+    socket.once("message", (data) => {
+      clearTimeout(timeout);
+      resolve(data);
     });
   });
 }
@@ -64,70 +82,70 @@ describe("WebSocket Server", () => {
   });
 
   it("should initialize WebSocket server", () => {
-    const wss = getWebSocketServer();
-    expect(wss).toBeDefined();
+    const io = getSocketIOServer();
+    expect(io).toBeDefined();
   });
 
   it("should accept client connections", async () => {
-    const ws = new WebSocket(`ws://localhost:${port}/ws`);
-    await waitForOpen(ws);
+    const socket = createClientSocket(port);
+    await waitForConnect(socket);
 
     expect(getClientCount()).toBe(1);
     expect(getConnectedClients()).toHaveLength(1);
 
-    ws.close();
+    socket.disconnect();
     await new Promise((r) => setTimeout(r, 50));
   });
 
   it("should send connected message on connection", async () => {
-    const ws = new WebSocket(`ws://localhost:${port}/ws`);
-    const message = await waitForMessage(ws);
+    const socket = createClientSocket(port);
+    const message = await waitForMessage(socket);
 
     expect(message).toMatchObject({
       type: "connected",
       clientId: expect.stringMatching(/^client-/),
     });
 
-    ws.close();
+    socket.disconnect();
   });
 
   it("should handle multiple clients", async () => {
-    const ws1 = new WebSocket(`ws://localhost:${port}/ws`);
-    const ws2 = new WebSocket(`ws://localhost:${port}/ws`);
+    const socket1 = createClientSocket(port);
+    const socket2 = createClientSocket(port);
 
-    await Promise.all([waitForOpen(ws1), waitForOpen(ws2)]);
+    await Promise.all([waitForConnect(socket1), waitForConnect(socket2)]);
 
     expect(getClientCount()).toBe(2);
     expect(getConnectedClients()).toHaveLength(2);
 
-    ws1.close();
-    ws2.close();
+    socket1.disconnect();
+    socket2.disconnect();
     await new Promise((r) => setTimeout(r, 50));
   });
 
   it("should remove client on disconnect", async () => {
-    const ws = new WebSocket(`ws://localhost:${port}/ws`);
-    await waitForOpen(ws);
+    const socket = createClientSocket(port);
+    await waitForConnect(socket);
 
     expect(getClientCount()).toBe(1);
 
-    ws.close();
+    socket.disconnect();
     await new Promise((r) => setTimeout(r, 50));
 
     expect(getClientCount()).toBe(0);
   });
 
   it("should broadcast message to all clients", async () => {
-    const ws1 = new WebSocket(`ws://localhost:${port}/ws`);
-    const ws2 = new WebSocket(`ws://localhost:${port}/ws`);
+    const socket1 = createClientSocket(port);
+    const socket2 = createClientSocket(port);
 
-    await Promise.all([waitForOpen(ws1), waitForOpen(ws2)]);
+    await Promise.all([waitForConnect(socket1), waitForConnect(socket2)]);
 
     const messages1: unknown[] = [];
     const messages2: unknown[] = [];
 
-    ws1.on("message", (data) => messages1.push(JSON.parse(data.toString())));
-    ws2.on("message", (data) => messages2.push(JSON.parse(data.toString())));
+    socket1.on("message", (data) => messages1.push(data));
+    socket2.on("message", (data) => messages2.push(data));
 
     await new Promise((r) => setTimeout(r, 50));
 
@@ -141,17 +159,17 @@ describe("WebSocket Server", () => {
     expect(broadcastMsg1).toEqual({ type: "test", data: "hello" });
     expect(broadcastMsg2).toEqual({ type: "test", data: "hello" });
 
-    ws1.close();
-    ws2.close();
+    socket1.disconnect();
+    socket2.disconnect();
   });
 
   it("should clean up on stop", async () => {
-    const ws = new WebSocket(`ws://localhost:${port}/ws`);
-    await waitForOpen(ws);
+    const socket = createClientSocket(port);
+    await waitForConnect(socket);
 
     stopWebSocket();
 
-    expect(getWebSocketServer()).toBeNull();
+    expect(getSocketIOServer()).toBeNull();
     expect(getClientCount()).toBe(0);
   });
 
@@ -160,8 +178,8 @@ describe("WebSocket Server", () => {
       const handler = vi.fn();
       setMessageHandler(handler);
 
-      const ws = new WebSocket(`ws://localhost:${port}/ws`);
-      await waitForOpen(ws);
+      const socket = createClientSocket(port);
+      await waitForConnect(socket);
 
       const clientId = getConnectedClients()[0];
       const testMessage: ClientMessage = {
@@ -169,46 +187,23 @@ describe("WebSocket Server", () => {
         sessionId: "test-session",
       };
 
-      ws.send(JSON.stringify(testMessage));
+      socket.emit("message", testMessage);
       await new Promise((r) => setTimeout(r, 50));
 
       expect(handler).toHaveBeenCalledWith(clientId, testMessage);
-      ws.close();
-    });
-
-    it("should send error for invalid JSON", async () => {
-      const ws = new WebSocket(`ws://localhost:${port}/ws`);
-      await waitForOpen(ws);
-
-      const messages: unknown[] = [];
-      ws.on("message", (data) => messages.push(JSON.parse(data.toString())));
-
-      await new Promise((r) => setTimeout(r, 50));
-
-      ws.send("not valid json");
-      await new Promise((r) => setTimeout(r, 50));
-
-      const errorMsg = messages.find(
-        (m: unknown) => (m as { type: string }).type === "error"
-      );
-      expect(errorMsg).toMatchObject({
-        type: "error",
-        message: "Invalid JSON message",
-      });
-
-      ws.close();
+      socket.disconnect();
     });
 
     it("should send error for message without type", async () => {
-      const ws = new WebSocket(`ws://localhost:${port}/ws`);
-      await waitForOpen(ws);
+      const socket = createClientSocket(port);
+      await waitForConnect(socket);
 
       const messages: unknown[] = [];
-      ws.on("message", (data) => messages.push(JSON.parse(data.toString())));
+      socket.on("message", (data) => messages.push(data));
 
       await new Promise((r) => setTimeout(r, 50));
 
-      ws.send(JSON.stringify({ foo: "bar" }));
+      socket.emit("message", { foo: "bar" });
       await new Promise((r) => setTimeout(r, 50));
 
       const errorMsg = messages.find(
@@ -219,7 +214,7 @@ describe("WebSocket Server", () => {
         message: "Message must have a type",
       });
 
-      ws.close();
+      socket.disconnect();
     });
 
     it("should send error when handler throws", async () => {
@@ -227,15 +222,15 @@ describe("WebSocket Server", () => {
         throw new Error("Handler failed");
       });
 
-      const ws = new WebSocket(`ws://localhost:${port}/ws`);
-      await waitForOpen(ws);
+      const socket = createClientSocket(port);
+      await waitForConnect(socket);
 
       const messages: unknown[] = [];
-      ws.on("message", (data) => messages.push(JSON.parse(data.toString())));
+      socket.on("message", (data) => messages.push(data));
 
       await new Promise((r) => setTimeout(r, 50));
 
-      ws.send(JSON.stringify({ type: "session.start" }));
+      socket.emit("message", { type: "session.start" });
       await new Promise((r) => setTimeout(r, 50));
 
       const errorMsg = messages.find(
@@ -246,14 +241,14 @@ describe("WebSocket Server", () => {
         message: "Handler failed",
       });
 
-      ws.close();
+      socket.disconnect();
     });
   });
 
   describe("session-client association", () => {
     it("should associate client with session", async () => {
-      const ws = new WebSocket(`ws://localhost:${port}/ws`);
-      await waitForOpen(ws);
+      const socket = createClientSocket(port);
+      await waitForConnect(socket);
 
       const clientId = getConnectedClients()[0];
       const result = associateClientWithSession(clientId, "session-1");
@@ -263,7 +258,7 @@ describe("WebSocket Server", () => {
       expect(getClientsBySession("session-1")).toContain(clientId);
       expect(getActiveSessions()).toContain("session-1");
 
-      ws.close();
+      socket.disconnect();
     });
 
     it("should return false for non-existent client", () => {
@@ -272,10 +267,10 @@ describe("WebSocket Server", () => {
     });
 
     it("should handle multiple clients in same session", async () => {
-      const ws1 = new WebSocket(`ws://localhost:${port}/ws`);
-      const ws2 = new WebSocket(`ws://localhost:${port}/ws`);
+      const socket1 = createClientSocket(port);
+      const socket2 = createClientSocket(port);
 
-      await Promise.all([waitForOpen(ws1), waitForOpen(ws2)]);
+      await Promise.all([waitForConnect(socket1), waitForConnect(socket2)]);
 
       const [clientId1, clientId2] = getConnectedClients();
       associateClientWithSession(clientId1, "session-1");
@@ -286,13 +281,13 @@ describe("WebSocket Server", () => {
       expect(sessionClients).toContain(clientId1);
       expect(sessionClients).toContain(clientId2);
 
-      ws1.close();
-      ws2.close();
+      socket1.disconnect();
+      socket2.disconnect();
     });
 
     it("should move client to new session when re-associated", async () => {
-      const ws = new WebSocket(`ws://localhost:${port}/ws`);
-      await waitForOpen(ws);
+      const socket = createClientSocket(port);
+      await waitForConnect(socket);
 
       const clientId = getConnectedClients()[0];
       associateClientWithSession(clientId, "session-1");
@@ -303,12 +298,12 @@ describe("WebSocket Server", () => {
       expect(getClientsBySession("session-2")).toContain(clientId);
       expect(getActiveSessions()).not.toContain("session-1");
 
-      ws.close();
+      socket.disconnect();
     });
 
     it("should dissociate client from session", async () => {
-      const ws = new WebSocket(`ws://localhost:${port}/ws`);
-      await waitForOpen(ws);
+      const socket = createClientSocket(port);
+      await waitForConnect(socket);
 
       const clientId = getConnectedClients()[0];
       associateClientWithSession(clientId, "session-1");
@@ -318,29 +313,29 @@ describe("WebSocket Server", () => {
       expect(getClientSession(clientId)).toBeUndefined();
       expect(getClientsBySession("session-1")).not.toContain(clientId);
 
-      ws.close();
+      socket.disconnect();
     });
 
     it("should return false when dissociating client not in session", async () => {
-      const ws = new WebSocket(`ws://localhost:${port}/ws`);
-      await waitForOpen(ws);
+      const socket = createClientSocket(port);
+      await waitForConnect(socket);
 
       const clientId = getConnectedClients()[0];
       const result = dissociateClientFromSession(clientId);
 
       expect(result).toBe(false);
 
-      ws.close();
+      socket.disconnect();
     });
 
     it("should clean up session association on disconnect", async () => {
-      const ws = new WebSocket(`ws://localhost:${port}/ws`);
-      await waitForOpen(ws);
+      const socket = createClientSocket(port);
+      await waitForConnect(socket);
 
       const clientId = getConnectedClients()[0];
       associateClientWithSession(clientId, "session-1");
 
-      ws.close();
+      socket.disconnect();
       await new Promise((r) => setTimeout(r, 50));
 
       expect(getClientsBySession("session-1")).toHaveLength(0);
@@ -350,14 +345,14 @@ describe("WebSocket Server", () => {
 
   describe("sendToSession", () => {
     it("should send message to all clients in session", async () => {
-      const ws1 = new WebSocket(`ws://localhost:${port}/ws`);
-      const ws2 = new WebSocket(`ws://localhost:${port}/ws`);
-      const ws3 = new WebSocket(`ws://localhost:${port}/ws`);
+      const socket1 = createClientSocket(port);
+      const socket2 = createClientSocket(port);
+      const socket3 = createClientSocket(port);
 
       const [msg1, msg2, msg3] = await Promise.all([
-        waitForMessage(ws1),
-        waitForMessage(ws2),
-        waitForMessage(ws3),
+        waitForMessage(socket1),
+        waitForMessage(socket2),
+        waitForMessage(socket3),
       ]) as Array<{ type: string; clientId: string }>;
 
       const clientId1 = msg1.clientId;
@@ -372,9 +367,9 @@ describe("WebSocket Server", () => {
       const messages2: unknown[] = [];
       const messages3: unknown[] = [];
 
-      ws1.on("message", (data) => messages1.push(JSON.parse(data.toString())));
-      ws2.on("message", (data) => messages2.push(JSON.parse(data.toString())));
-      ws3.on("message", (data) => messages3.push(JSON.parse(data.toString())));
+      socket1.on("message", (data) => messages1.push(data));
+      socket2.on("message", (data) => messages2.push(data));
+      socket3.on("message", (data) => messages3.push(data));
 
       await new Promise((r) => setTimeout(r, 50));
 
@@ -401,9 +396,9 @@ describe("WebSocket Server", () => {
       expect(testMsg2).toEqual({ type: "test", data: "session message" });
       expect(testMsg3).toBeUndefined();
 
-      ws1.close();
-      ws2.close();
-      ws3.close();
+      socket1.disconnect();
+      socket2.disconnect();
+      socket3.disconnect();
     });
 
     it("should return 0 for non-existent session", () => {
@@ -417,15 +412,15 @@ describe("WebSocket Server", () => {
 
   describe("ping/pong", () => {
     it("should respond to ping with pong", async () => {
-      const ws = new WebSocket(`ws://localhost:${port}/ws`);
-      await waitForOpen(ws);
+      const socket = createClientSocket(port);
+      await waitForConnect(socket);
 
       const messages: unknown[] = [];
-      ws.on("message", (data) => messages.push(JSON.parse(data.toString())));
+      socket.on("message", (data) => messages.push(data));
 
       await new Promise((r) => setTimeout(r, 50));
 
-      ws.send(JSON.stringify({ type: "ping" }));
+      socket.emit("message", { type: "ping" });
       await new Promise((r) => setTimeout(r, 50));
 
       const pongMsg = messages.find(
@@ -433,17 +428,17 @@ describe("WebSocket Server", () => {
       );
       expect(pongMsg).toMatchObject({ type: "pong" });
 
-      ws.close();
+      socket.disconnect();
     });
   });
 
   describe("session control", () => {
     it("should give control to first client associating with session", async () => {
-      const ws = new WebSocket(`ws://localhost:${port}/ws`);
-      await waitForOpen(ws);
+      const socket = createClientSocket(port);
+      await waitForConnect(socket);
 
       const messages: unknown[] = [];
-      ws.on("message", (data) => messages.push(JSON.parse(data.toString())));
+      socket.on("message", (data) => messages.push(data));
 
       await new Promise((r) => setTimeout(r, 50));
 
@@ -462,23 +457,23 @@ describe("WebSocket Server", () => {
       expect(hasSessionControl(clientId, "session-1")).toBe(true);
       expect(getSessionController("session-1")).toBe(clientId);
 
-      ws.close();
+      socket.disconnect();
     });
 
     it("should not give control to subsequent clients", async () => {
-      const ws1 = new WebSocket(`ws://localhost:${port}/ws`);
-      const ws2 = new WebSocket(`ws://localhost:${port}/ws`);
+      const socket1 = createClientSocket(port);
+      const socket2 = createClientSocket(port);
 
       const [msg1, msg2] = await Promise.all([
-        waitForMessage(ws1),
-        waitForMessage(ws2),
+        waitForMessage(socket1),
+        waitForMessage(socket2),
       ]) as Array<{ type: string; clientId: string }>;
 
       const clientId1 = msg1.clientId;
       const clientId2 = msg2.clientId;
 
       const messages2: unknown[] = [];
-      ws2.on("message", (data) => messages2.push(JSON.parse(data.toString())));
+      socket2.on("message", (data) => messages2.push(data));
 
       associateClientWithSession(clientId1, "session-1");
 
@@ -498,17 +493,17 @@ describe("WebSocket Server", () => {
       expect(hasSessionControl(clientId2, "session-1")).toBe(false);
       expect(getSessionController("session-1")).toBe(clientId1);
 
-      ws1.close();
-      ws2.close();
+      socket1.disconnect();
+      socket2.disconnect();
     });
 
     it("should transfer control when controller disconnects", async () => {
-      const ws1 = new WebSocket(`ws://localhost:${port}/ws`);
-      const ws2 = new WebSocket(`ws://localhost:${port}/ws`);
+      const socket1 = createClientSocket(port);
+      const socket2 = createClientSocket(port);
 
       const [msg1, msg2] = await Promise.all([
-        waitForMessage(ws1),
-        waitForMessage(ws2),
+        waitForMessage(socket1),
+        waitForMessage(socket2),
       ]) as Array<{ type: string; clientId: string }>;
 
       const clientId1 = msg1.clientId;
@@ -518,11 +513,11 @@ describe("WebSocket Server", () => {
       associateClientWithSession(clientId2, "session-1");
 
       const messages2: unknown[] = [];
-      ws2.on("message", (data) => messages2.push(JSON.parse(data.toString())));
+      socket2.on("message", (data) => messages2.push(data));
 
       await new Promise((r) => setTimeout(r, 50));
 
-      ws1.close();
+      socket1.disconnect();
 
       await new Promise((r) => setTimeout(r, 100));
 
@@ -537,16 +532,16 @@ describe("WebSocket Server", () => {
       });
       expect(getSessionController("session-1")).toBe(clientId2);
 
-      ws2.close();
+      socket2.disconnect();
     });
 
     it("should allow requesting control transfer", async () => {
-      const ws1 = new WebSocket(`ws://localhost:${port}/ws`);
-      const ws2 = new WebSocket(`ws://localhost:${port}/ws`);
+      const socket1 = createClientSocket(port);
+      const socket2 = createClientSocket(port);
 
       const [msg1, msg2] = await Promise.all([
-        waitForMessage(ws1),
-        waitForMessage(ws2),
+        waitForMessage(socket1),
+        waitForMessage(socket2),
       ]) as Array<{ type: string; clientId: string }>;
 
       const clientId1 = msg1.clientId;
@@ -557,8 +552,8 @@ describe("WebSocket Server", () => {
 
       const messages1: unknown[] = [];
       const messages2: unknown[] = [];
-      ws1.on("message", (data) => messages1.push(JSON.parse(data.toString())));
-      ws2.on("message", (data) => messages2.push(JSON.parse(data.toString())));
+      socket1.on("message", (data) => messages1.push(data));
+      socket2.on("message", (data) => messages2.push(data));
 
       await new Promise((r) => setTimeout(r, 50));
 
@@ -583,8 +578,8 @@ describe("WebSocket Server", () => {
       expect(lostControl).toBeDefined();
       expect(gainedControl).toBeDefined();
 
-      ws1.close();
-      ws2.close();
+      socket1.disconnect();
+      socket2.disconnect();
     });
 
     it("should return false for requestSessionControl with non-existent client", () => {
