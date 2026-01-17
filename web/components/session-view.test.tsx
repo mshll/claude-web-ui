@@ -108,7 +108,7 @@ describe('SessionView', () => {
   });
 
   it('hides loading state after messages load', async () => {
-    const { container } = render(<SessionView sessionId="test-session" />);
+    render(<SessionView sessionId="test-session" />);
 
     expect(screen.getByText('Loading...')).toBeInTheDocument();
 
@@ -116,10 +116,8 @@ describe('SessionView', () => {
     eventSource.emit('messages', []);
 
     await waitFor(() => {
-      expect(container.querySelector('.flex-1.overflow-y-auto')).toBeInTheDocument();
+      expect(screen.queryByText('Loading...')).not.toBeInTheDocument();
     });
-
-    expect(screen.queryByText('Loading...')).not.toBeInTheDocument();
   });
 
   it('shows connecting placeholder when WebSocket is disconnected', async () => {

@@ -12,21 +12,21 @@ afterEach(() => {
 describe("ConnectionStatusIndicator", () => {
   it("renders connected status with green indicator", () => {
     render(<ConnectionStatusIndicator status="connected" />);
-    expect(screen.getByText("Connected")).toBeDefined();
+    expect(screen.getByTitle("Connected")).toBeDefined();
     const indicator = document.querySelector(".bg-emerald-500");
     expect(indicator).not.toBeNull();
   });
 
   it("renders connecting status with amber indicator", () => {
     render(<ConnectionStatusIndicator status="connecting" />);
-    expect(screen.getByText("Connecting")).toBeDefined();
+    expect(screen.getByTitle("Connecting")).toBeDefined();
     const indicator = document.querySelector(".bg-amber-500");
     expect(indicator).not.toBeNull();
   });
 
   it("renders disconnected status with zinc indicator", () => {
     render(<ConnectionStatusIndicator status="disconnected" />);
-    expect(screen.getByText("Disconnected")).toBeDefined();
+    expect(screen.getByTitle("Disconnected")).toBeDefined();
     const indicator = document.querySelector(".bg-zinc-500");
     expect(indicator).not.toBeNull();
   });
